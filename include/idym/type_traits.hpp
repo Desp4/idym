@@ -82,6 +82,7 @@ struct is_nothrow_swappable_with : _internal::nothrow_swappable_2<T, U> {};
 template<typename T, typename U>
 constexpr bool is_nothrow_swappable_with_v = is_nothrow_swappable_with<T, U>::value;
 
+// === is_nothrow_swappable
 template<typename T>
 struct is_nothrow_swappable : is_nothrow_swappable_with<::std::add_lvalue_reference_t<T>, ::std::add_lvalue_reference_t<T>> {};
 template<typename T>

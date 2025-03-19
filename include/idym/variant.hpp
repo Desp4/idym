@@ -1,12 +1,19 @@
 #ifndef IDYM_VARIANT_H
 #define IDYM_VARIANT_H
 
+#include <array>
 #include <utility>
 #include <cstddef>
+#include <exception>
+#include <functional>
 #include <initializer_list>
 
 #include "type_traits.hpp"
 #include "utility.hpp"
+
+namespace std {
+template<typename> struct hash;
+}
 
 namespace idym {
 
@@ -15,6 +22,21 @@ class variant;
 
 // === variant_npos
 constexpr ::std::size_t variant_npos = -1; // TODO: c++17 inline
+
+// === monostate
+struct monostate{};
+
+inline constexpr bool operator==(monostate, monostate) noexcept { return true; }
+// TODO: c++20 spaceship
+
+// === bad_variant_access
+class bad_variant_access : public ::std::exception {
+public:
+    bad_variant_access() = default;
+    inline const char* what() const noexcept override {
+        return "Bad variant access. Too bad!";
+    }
+};
 
 namespace _internal { // >>> internal
 
@@ -37,6 +59,8 @@ template<bool Trivial_Dtor> union variant_storage_impl<Trivial_Dtor> {};
 
 template<typename T, typename... Ts>
 union variant_storage_impl<true, T, Ts...> {
+    static constexpr ::std::size_t size = sizeof...(Ts) + 1;
+
     T v0;
     variant_storage<Ts...> v1;
     
@@ -45,6 +69,8 @@ union variant_storage_impl<true, T, Ts...> {
 
 template<typename T, typename... Ts>
 union variant_storage_impl<false, T, Ts...> {
+    static constexpr ::std::size_t size = sizeof...(Ts) + 1;
+
     T v0;
     variant_storage<Ts...> v1;
     
@@ -52,60 +78,217 @@ union variant_storage_impl<false, T, Ts...> {
     ~variant_storage_impl() {} // TODO: c++20, constexpr
 };
 
-// === alternative destruction
-template<::std::size_t I, typename Storage_T>
-constexpr void destroy_alternative(::std::size_t index, Storage_T& variant) {
-    using v0_t = decltype(variant.v0);
-    if (index == I)
-        variant.v0.~v0_t();
-    else
-        destroy_alternative<I + 1>(index, variant.v1);
-}
-template<::std::size_t>
-constexpr void destroy_alternative(::std::size_t, variant_storage<>&) {}
+// === internal get
+template<::std::size_t I>
+struct get_variant_storage {
+    template<typename Storage_T>
+    static constexpr auto do_get(Storage_T&& storage) {
+        return get_variant_storage<I - 1>::do_get(storage.v1);
+    }
+    template<typename Storage_T>
+    static constexpr decltype(auto) do_get_ref(Storage_T&& storage) {
+        return get_variant_storage<I - 1>::do_get_ref(storage.v1);
+    }
+};
+template<>
+struct get_variant_storage<0> {
+    template<typename Storage_T>
+    static constexpr auto do_get(Storage_T&& storage) {
+        return &storage.v0;
+    }
+    template<typename Storage_T>
+    static constexpr decltype(auto) do_get_ref(Storage_T&& storage) {
+        return ::std::forward<Storage_T>(storage).v0;
+    }
+};
 
-// === apply generic functor to alternatives
-template<::std::size_t I, typename Fun, typename Storage_T>
-constexpr void apply_to_alternatives(::std::size_t index, Fun apply_fun, Storage_T& lhs, Storage_T& rhs) {
-    if (index == I)
-        apply_fun(&lhs.v0, &rhs.v0);
-    else
-        apply_to_alternatives<I + 1>(index, apply_fun, lhs.v1, rhs.v1);
+// === visitor
+template<typename Ret_T, ::std::size_t... Is, typename... Storage_Ts, typename Visitor_T>
+constexpr Ret_T dispatch_variant_storage(Visitor_T visitor, Storage_Ts... vs) {
+    return ::std::forward<decltype(visitor)>(visitor)(get_variant_storage<Is>::do_get_ref(::std::forward<decltype(vs)>(vs))...);
 }
 
-template<::std::size_t, typename Fun>
-constexpr void apply_to_alternatives(::std::size_t, Fun, variant_storage<>&, variant_storage<>&) {}
+template<typename Ret_T, typename Visitor_T, typename... Storage_Ts, ::std::size_t... Is, ::std::size_t... Sequence_Is>
+constexpr auto make_dispatch_table(::std::index_sequence<Is...>, ::std::index_sequence<Sequence_Is...>) {
+    using dispatch_t = decltype(dispatch_variant_storage<Ret_T, Sequence_Is..., 0, Storage_Ts..., Visitor_T>);
+    return ::std::array<dispatch_t*, sizeof...(Is)>{dispatch_variant_storage<Ret_T, Sequence_Is..., Is, Storage_Ts..., Visitor_T>...};
+}
+
+template<typename Alt_Indices, typename Src_Type>
+struct alt_visitor_arg {};
+
+template<typename... Args>
+struct alt_visitor_accumulator {};
+
+template<typename Ret_t, typename Accumulator_T, typename Is_Sequence, typename Visitor_T, typename... Storage_Ts>
+struct alt_visitor_table;
+
+template<
+    typename Ret_T,
+    typename... Acc_Ts,
+    ::std::size_t... Is_Sequence,
+    typename Visitor_T,
+    ::std::size_t... Alt_Indices, typename Src_T,
+    typename... Storage_Ts
+>
+struct alt_visitor_table<
+    Ret_T,
+    alt_visitor_accumulator<Acc_Ts...>,
+    ::std::index_sequence<Is_Sequence...>,
+    Visitor_T,
+    alt_visitor_arg<::std::index_sequence<Alt_Indices...>, Src_T>,
+    Storage_Ts...
+>
+{
+    using next_dispatch_t = alt_visitor_table<
+        Ret_T,
+        alt_visitor_accumulator<Acc_Ts..., Src_T>,
+        ::std::index_sequence<Is_Sequence..., 0>,
+        Visitor_T,
+        Storage_Ts...
+    >;
+    using next_dispatch_table_t = decltype(next_dispatch_t::dispatch_table);
+
+    static constexpr ::std::array<next_dispatch_table_t, sizeof...(Alt_Indices)> dispatch_table{
+        alt_visitor_table<
+            Ret_T,
+            alt_visitor_accumulator<Acc_Ts..., Src_T>,
+            ::std::index_sequence<Is_Sequence..., Alt_Indices>,
+            Visitor_T,
+            Storage_Ts...
+        >::dispatch_table...
+    };
+};
+
+template<
+    typename Ret_T,
+    typename... Acc_Ts,
+    ::std::size_t... Is_Sequence,
+    typename Visitor_T,
+    ::std::size_t... Alt_Indices, typename Src_T
+>
+struct alt_visitor_table<
+    Ret_T,
+    alt_visitor_accumulator<Acc_Ts...>,
+    ::std::index_sequence<Is_Sequence...>,
+    Visitor_T,
+    alt_visitor_arg<::std::index_sequence<Alt_Indices...>, Src_T>
+>
+{
+    static constexpr auto dispatch_table = make_dispatch_table<Ret_T, Visitor_T, Acc_Ts..., Src_T>(::std::index_sequence<Alt_Indices...>{}, ::std::index_sequence<Is_Sequence...>{});
+};
+
+template<::std::size_t N, ::std::size_t I, typename Dispatch_Table_T>
+constexpr auto find_dispatch_entry(::std::integral_constant<::std::size_t, I>, const ::std::array<::std::size_t, N>& indices, const Dispatch_Table_T& dispatch_table) {
+    return find_dispatch_entry(::std::integral_constant<::std::size_t, I + 1>{}, indices, dispatch_table[I]);
+}
+template<::std::size_t N, typename Dispatch_Table_T>
+constexpr auto find_dispatch_entry(::std::integral_constant<::std::size_t, N>, const ::std::array<::std::size_t, N>& indices, const Dispatch_Table_T& dispatch_table) {
+    return dispatch_table;
+}
+
+template<typename Ret_T = void, typename Visitor_T, ::std::size_t N, typename... Storage_Ts>
+constexpr decltype(auto) visit_impl(Visitor_T&& visitor, const ::std::array<::std::size_t, N>& indices, Storage_Ts&&... vs) {
+    using dispatcher_t = alt_visitor_table<
+        Ret_T,
+        alt_visitor_accumulator<>,
+        ::std::index_sequence<>,
+        decltype(::std::forward<Visitor_T>(visitor)),
+        alt_visitor_arg<::std::make_index_sequence<remove_cvref_t<Storage_Ts>::size>, decltype(::std::forward<Storage_Ts>(vs))>...
+    >;
+    
+    constexpr auto dispatch_table = dispatcher_t::dispatch_table;
+    const auto dispatch_fun = find_dispatch_entry(::std::integral_constant<::std::size_t, 0>{}, indices, dispatch_table);
+    return dispatch_fun(::std::forward<Visitor_T>(visitor), ::std::forward<Storage_Ts>(vs)...);
+}
+
+template<typename Ret_T = void, typename Visitor_T, typename... Storage_Ts>
+constexpr decltype(auto) visit_impl(Visitor_T&& visitor, ::std::size_t index, Storage_Ts&&... vs) {
+    ::std::array<::std::size_t, sizeof...(Storage_Ts)> indices;
+    for (auto& arr_index : indices)
+        arr_index = index;
+    return visit_impl<Ret_T>(::std::forward<Visitor_T>(visitor), indices, ::std::forward<Storage_Ts>(vs)...);
+}
 
 // === generic constructor callables, to be applied with the function above
+struct destroy_alternative {
+    template<typename Container_T>
+    constexpr void operator()(Container_T& value) const {
+        value.~Container_T();
+    }
+};
 struct copy_construct_alternative {
     template<typename Container_T>
-    constexpr void operator()(Container_T* lhs, const Container_T* rhs) const {
-        ::new (lhs) Container_T{*rhs};
+    constexpr void operator()(Container_T& lhs, const Container_T& rhs) const {
+        ::new (&lhs) Container_T{rhs};
     }
 };
 struct move_construct_alternative {
     template<typename Container_T>
-    constexpr void operator()(Container_T* lhs, Container_T* rhs) const {
-        ::new (lhs) Container_T{::std::move(*rhs)};
+    constexpr void operator()(Container_T& lhs, Container_T& rhs) const {
+        ::new (&lhs) Container_T{::std::move(rhs)};
     }
 };
 struct copy_assign_alternative {
     template<typename Container_T>
-    constexpr void operator()(Container_T* lhs, const Container_T* rhs) const {
-        *lhs = *rhs;
+    constexpr void operator()(Container_T& lhs, const Container_T& rhs) const {
+        lhs = rhs;
     }
 };
 struct move_assign_alternative {
     template<typename Container_T>
-    constexpr void operator()(Container_T* lhs, Container_T* rhs) const {
-        *lhs = ::std::move(*rhs);
+    constexpr void operator()(Container_T& lhs, Container_T& rhs) const {
+        lhs = ::std::move(rhs);
     }
 };
 struct swap_alternative {
     template<typename Container_T>
-    constexpr void operator()(Container_T* lhs, Container_T* rhs) const {
+    constexpr void operator()(Container_T& lhs, Container_T& rhs) const {
         using ::std::swap;
-        swap(*lhs, *rhs);
+        swap(lhs, rhs);
+    }
+};
+
+struct eq_alternative {
+    template<typename Container_T>
+    constexpr bool operator()(const Container_T& lhs, Container_T& rhs) const {
+        return lhs == rhs;
+    }
+};
+struct neq_alternative {
+    template<typename Container_T>
+    constexpr bool operator()(const Container_T& lhs, Container_T& rhs) const {
+        return lhs != rhs;
+    }
+};
+struct less_alternative {
+    template<typename Container_T>
+    constexpr bool operator()(const Container_T& lhs, Container_T& rhs) const {
+        return lhs < rhs;
+    }
+};
+struct greater_alternative {
+    template<typename Container_T>
+    constexpr bool operator()(const Container_T& lhs, Container_T& rhs) const {
+        return lhs > rhs;
+    }
+};
+struct leq_alternative {
+    template<typename Container_T>
+    constexpr bool operator()(const Container_T& lhs, Container_T& rhs) const {
+        return lhs <= rhs;
+    }
+};
+struct geq_alternative {
+    template<typename Container_T>
+    constexpr bool operator()(const Container_T& lhs, Container_T& rhs) const {
+        return lhs >= rhs;
+    }
+};
+struct hash_alternative {
+    template<typename Container_T>
+    constexpr ::std::size_t operator()(const Container_T& v) const {
+        return ::std::hash<::std::remove_cv<Container_T>>{}(v);
     }
 };
 
@@ -114,45 +297,31 @@ template<typename Var_Lhs, typename Var_Rhs, typename Ctor_Fun, typename Ass_Fun
 constexpr auto& assign_variants(Var_Lhs&& lhs, Var_Rhs&& rhs, Ctor_Fun ctor, Ass_Fun ass) {
     if (rhs._index == variant_npos) {
         if (lhs._index != variant_npos) {
-            destroy_alternative<0>(lhs._index, lhs._storage);
+            visit_impl(destroy_alternative{}, lhs._index, lhs._storage);
             lhs._index = variant_npos;
         }
         return lhs;
     }
     
     if (lhs._index == rhs._index) {
-        apply_to_alternatives<0>(lhs._index, ass, lhs._storage, rhs._storage);
+        visit_impl(ass, lhs._index, lhs._storage, rhs._storage);
     } else {
         if (lhs._index != variant_npos) {
-            destroy_alternative<0>(lhs._index, lhs._storage);
+            destroy_alternative(lhs._index, destroy_alternative{}, lhs._storage);
             lhs._index = variant_npos;
         }
         
-        apply_to_alternatives<0>(rhs._index, ctor, lhs._storage, rhs._storage);
+        visit_impl(ctor, rhs._index, lhs._storage, rhs._storage);
         lhs._index = rhs._index;
     }
     return lhs;
 }
 
-// === internal get
-template<::std::size_t I>
-struct get_variant_storage {
-    template<typename Storage_T>
-    constexpr static auto do_get(Storage_T&& storage) {
-        return get_variant_storage<I - 1>(storage.v1);
-    }
-};
-template<>
-struct get_variant_storage<0> {
-    template<typename Storage_T>
-    constexpr static auto do_get(Storage_T&& storage) {
-        return &storage.v0;
-    }
-};
-
 // === variant_base
 template<typename... Ts>
 struct variant_base {
+    static constexpr ::std::size_t size = sizeof...(Ts);
+
     variant_storage<Ts...> _storage;
     ::std::size_t _index = variant_npos;
 };
@@ -173,7 +342,7 @@ template<typename... Ts>
 struct variant_base_dtor<false, Ts...> : variant_base_dtor<true, Ts...> {
     ~variant_base_dtor() { // TODO: c++20 constexpr
         if (this->_index != variant_npos)
-            destroy_alternative<0>(this->_index, this->_storage);
+            visit_impl(destroy_alternative{}, this->_index, this->_storage);
     }
 };
 
@@ -192,7 +361,7 @@ struct variant_base_copy_ctor<false, Ts...> : variant_base_copy_ctor<true, Ts...
     constexpr variant_base_copy_ctor(const variant_base_copy_ctor& other) {
         if (other._index == variant_npos)
             return;
-        apply_to_alternatives<0>(other._index, copy_construct_alternative{}, this->_storage, other._storage);
+        visit_impl(copy_construct_alternative{}, other._index, this->_storage, other._storage);
         this->_index = other._index;
     }
 };
@@ -207,15 +376,19 @@ struct variant_base_move_ctor<true, Ts...> : variant_base_copy_ctor<
     Ts...
 >
 {
+    constexpr variant_base_move_ctor() = default;
+    constexpr variant_base_move_ctor(const variant_base_move_ctor&) = default;
     constexpr variant_base_move_ctor(variant_base_move_ctor&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
 };
 
 template<typename... Ts>
 struct variant_base_move_ctor<false, Ts...> : variant_base_move_ctor<true, Ts...> {
+    constexpr variant_base_move_ctor() = default;
+    constexpr variant_base_move_ctor(const variant_base_move_ctor&) = default;
     constexpr variant_base_move_ctor(variant_base_move_ctor&& other) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) {
         if (other._index == variant_npos)
             return;
-        apply_to_alternatives<0>(other._index, move_construct_alternative{}, this->_storage, other._storage);
+        visit_impl(move_construct_alternative{}, other._index, this->_storage, other._storage);
         this->_index = other._index;
     }
 };
@@ -232,6 +405,10 @@ struct variant_base_copy_ass<true, Ts...> : variant_base_move_ctor<
 
 template<typename... Ts>
 struct variant_base_copy_ass<false, Ts...> : variant_base_move_ctor<true, Ts...> {
+    constexpr variant_base_copy_ass() = default;
+    constexpr variant_base_copy_ass(const variant_base_copy_ass&) = default;
+    constexpr variant_base_copy_ass(variant_base_copy_ass&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
+
     constexpr variant_base_copy_ass& operator=(const variant_base_copy_ass& other) {
         return assign_variants(*this, other, copy_construct_alternative{}, copy_assign_alternative{});
     }
@@ -252,11 +429,21 @@ struct variant_base_move_ass<true, Ts...> : variant_base_copy_ass<
 >
 {
     static constexpr auto ass_nothrow = conjunction_v<::std::is_nothrow_move_constructible<Ts>...> && conjunction_v<::std::is_nothrow_move_assignable<Ts>...>;
+    
+    constexpr variant_base_move_ass() = default;
+    constexpr variant_base_move_ass(const variant_base_move_ass&) = default;
+    constexpr variant_base_move_ass(variant_base_move_ass&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
+    constexpr variant_base_move_ass& operator=(const variant_base_move_ass&) = default;
     constexpr variant_base_move_ass& operator=(variant_base_move_ass&&) noexcept(ass_nothrow) = default;
 };
 
 template<typename... Ts>
 struct variant_base_move_ass<false, Ts...> : variant_base_move_ass<true, Ts...> {
+    constexpr variant_base_move_ass() = default;
+    constexpr variant_base_move_ass(const variant_base_move_ass&) = default;
+    constexpr variant_base_move_ass(variant_base_move_ass&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
+    constexpr variant_base_move_ass& operator=(const variant_base_move_ass&) = default;
+
     constexpr variant_base_move_ass& operator=(variant_base_move_ass&& other) noexcept(variant_base_move_ass<true, Ts...>::ass_nothrow) {
         return assign_variants(*this, other, move_construct_alternative{}, move_assign_alternative{});
     }
@@ -314,6 +501,12 @@ struct alternative_to_index<I, Target_T, T, Ts...> : alternative_to_index<I + 1,
 template<::std::size_t I, typename Target_T, typename... Ts>
 struct alternative_to_index<I, Target_T, Target_T, Ts...> : ::std::integral_constant<::std::size_t, I> {};
 
+template<::std::size_t, typename, typename>
+struct alternative_to_index_helper;
+
+template<::std::size_t I, typename Target_T, typename... Ts>
+struct alternative_to_index_helper<I, Target_T, variant_base<Ts...>> : alternative_to_index<I, Target_T, Ts...> {};
+
 // === index_to_alternative
 template<::std::size_t, typename... Ts>
 struct index_to_alternative;
@@ -331,7 +524,7 @@ struct index_to_alternative<0, T, Ts...> {
 template<::std::size_t I, typename... Ts>
 using index_to_alternative_t = typename index_to_alternative<I, Ts...>::type;
 
-// type_occurrence_count
+// === type_occurrence_count
 template<typename, typename...>
 struct type_occurrence_count;
 
@@ -348,7 +541,13 @@ struct type_occurrence_count<Target_T> {
     static constexpr ::std::size_t value = 0;
 };
 
-// alternative constructor
+template<typename, typename>
+struct type_occurrence_count_helper;
+
+template<typename T, typename... Ts>
+struct type_occurrence_count<T, variant_base<Ts...>> : type_occurrence_count<T, Ts...> {};
+
+// === alternative constructor
 template<::std::size_t I, typename... Alt_Ts, typename... Ts>
 constexpr auto* init_alternative_at(variant_base<Alt_Ts...>&& storage, Ts&&... args) {
     auto* alt_ptr = get_variant_storage<I>::do_get(storage._storage);
@@ -357,24 +556,63 @@ constexpr auto* init_alternative_at(variant_base<Alt_Ts...>&& storage, Ts&&... a
     return alt_ptr;
 }
 
+// === get_impl
+template<::std::size_t I, typename Variant_T>
+constexpr auto get_if_impl(Variant_T&& v) {
+    static_assert(I < v.size, "I is required to be less than the alternative count");
+    return v._index == I ? get_variant_storage<I>::do_get(v._storage) : nullptr;
+}
+template<typename T, typename Variant_T>
+constexpr auto get_if_impl(Variant_T&& v) {
+    static_assert(type_occurrence_count_helper<T, remove_cvref_t<Variant_T>>::value == 1, "T has occur in Ts exactly once");
+    return get_if_impl<alternative_to_index_helper<0, T, remove_cvref_t<Variant_T>>::value>(::std::forward<Variant_T>(v));
+}
+
+template<::std::size_t I, typename Variant_T>
+constexpr auto get_impl(Variant_T&& v) {
+    if (auto ptr = get_if_impl<I>(::std::forward<Variant_T>(v)))
+        return ptr;
+    throw bad_variant_access{};
+}
+template<typename T, typename Variant_T>
+constexpr auto get_impl(Variant_T&& v) {
+    if (auto ptr = get_if_impl<T>(::std::forward<Variant_T>(v)))
+        return ptr;
+    throw bad_variant_access{};
+}
+
+// === relational tests
+template<typename, typename = void>
+struct eq_test : ::std::false_type {};
+template<typename T>
+struct eq_test<T, void_t<decltype(static_cast<bool>(::std::declval<T>() == ::std::declval<T>()))>> : ::std::true_type {};
+
+template<typename, typename = void>
+struct neq_test : ::std::false_type {};
+template<typename T>
+struct neq_test<T, void_t<decltype(static_cast<bool>(::std::declval<T>() != ::std::declval<T>()))>> : ::std::true_type {};
+
+template<typename, typename = void>
+struct less_test : ::std::false_type {};
+template<typename T>
+struct less_test<T, void_t<decltype(static_cast<bool>(::std::declval<T>() < ::std::declval<T>()))>> : ::std::true_type {};
+
+template<typename, typename = void>
+struct greater_test : ::std::false_type {};
+template<typename T>
+struct greater_test<T, void_t<decltype(static_cast<bool>(::std::declval<T>() > ::std::declval<T>()))>> : ::std::true_type {};
+
+template<typename, typename = void>
+struct leq_test : ::std::false_type {};
+template<typename T>
+struct leq_test<T, void_t<decltype(static_cast<bool>(::std::declval<T>() <= ::std::declval<T>()))>> : ::std::true_type {};
+
+template<typename, typename = void>
+struct geq_test : ::std::false_type {};
+template<typename T>
+struct geq_test<T, void_t<decltype(static_cast<bool>(::std::declval<T>() >= ::std::declval<T>()))>> : ::std::true_type {};
+
 } // <<< internal
-
-
-// === variant_size
-template<typename>
-struct variant_size;
-
-template<typename... Ts>
-struct variant_size<variant<Ts...>> : ::std::integral_constant<::std::size_t, sizeof...(Ts)> {};
-template<typename T>
-struct variant_size<const T> : variant_size<T> {};
-template<typename T>
-struct variant_size<volatile T> : variant_size<T> {}; // TODO: c++20 deprecated
-template<typename T>
-struct variant_size<const volatile T> : variant_size<T> {}; // TODO: c++20 deprecated
-
-template<typename T>
-constexpr ::std::size_t variant_size_v = variant_size<T>::value;
 
 // === variant_alternative
 template<::std::size_t I, typename T>
@@ -392,10 +630,26 @@ struct variant_alternative<I, const volatile T> : variant_alternative<I, T> {}; 
 template<::std::size_t I, typename T>
 using variant_alternative_t = typename variant_alternative<I, T>::type;
 
+// === variant_size
+template<typename>
+struct variant_size;
+
+template<typename... Ts>
+struct variant_size<variant<Ts...>> : ::std::integral_constant<::std::size_t, sizeof...(Ts)> {};
+template<typename T>
+struct variant_size<const T> : variant_size<T> {};
+template<typename T>
+struct variant_size<volatile T> : variant_size<T> {}; // TODO: c++20 deprecated
+template<typename T>
+struct variant_size<const volatile T> : variant_size<T> {}; // TODO: c++20 deprecated
+
+template<typename T>
+constexpr ::std::size_t variant_size_v = variant_size<T>::value;
+
 // === variant
 template<typename... Ts>
 class variant : _internal::variant_base_final<Ts...> {
-    static_assert(sizeof...(Ts) > 0, "variant must have at least one alternative");
+    static_assert(sizeof...(Ts) > 0, "Variant must have at least one alternative");
     
 public:
     template<::std::enable_if_t<::std::is_default_constructible<_internal::first_of_t<Ts...>>::value, bool> = true>
@@ -467,7 +721,9 @@ public:
     template<
         typename T,
         ::std::enable_if_t<
-            !::std::is_same<remove_cvref_t<T>, variant>::value &&
+            !::std::is_same<remove_cvref_t<T>, variant>::value,
+        bool> = true,
+        ::std::enable_if_t<
             ::std::is_assignable<_internal::variant_ctor_compat_t<T, Ts...>&, T>::value &&
             ::std::is_constructible<_internal::variant_ctor_compat_t<T, Ts...>, T>::value,
         bool> = true
@@ -521,8 +777,9 @@ public:
         bool> = true
     >
     constexpr variant_alternative<I, variant<Ts...>>& emplace(Args&&... args) {
+        static_assert(I < sizeof...(Ts), "I is required to be less than the alternative count");
         if (this->_index != variant_npos) {
-            _internal::destroy_alternative<0>(this->_index, this->_storage);
+            _internal::visit_impl(_internal::destroy_alternative{}, this->_index, this->_storage);
             this->_index = variant_npos;
         }
         return *_internal::init_alternative_at<I>(*this, std::forward<Args>(args)...);
@@ -537,8 +794,9 @@ public:
         bool> = true
     >
     constexpr variant_alternative<I, variant<Ts...>>& emplace(::std::initializer_list<U> il, Args&&... args) {
+        static_assert(I < sizeof...(Ts), "I is required to be less than the alternative count");
         if (this->_index != variant_npos) {
-            _internal::destroy_alternative<0>(this->_index, this->_storage);
+            _internal::visit_impl(_internal::destroy_alternative{}, this->_index, this->_storage);
             this->_index = variant_npos;
         }
         return *_internal::init_alternative_at<I>(*this, il, ::std::forward<Args>(args)...);
@@ -556,18 +814,18 @@ public:
             if (rhs._index == variant_npos)
                 return;
             
-            _internal::apply_to_alternatives<0>(rhs._index, _internal::move_construct_alternative{}, this->_storage, rhs._storage);
+            _internal::visit_impl(_internal::move_construct_alternative{}, rhs._index, this->_storage, rhs._storage);
             ::std::swap(this->_index, rhs._index);
             return;
         }
 
         if (rhs._index == variant_npos) {
-            _internal::apply_to_alternatives<0>(this->_index, _internal::move_construct_alternative{}, rhs._storage, this->_storage);
+            _internal::visit_impl(_internal::move_construct_alternative{}, this->_index, rhs._storage, this->_storage);
             return;
         }
 
         if (this->_index == rhs._index) {
-            _internal::apply_to_alternatives<0>(this->_index, _internal::swap_alternative{}, this->_storage, rhs._storage);
+            _internal::visit_impl(_internal::swap_alternative{}, this->_index, this->_storage, rhs._storage);
             return;
         }
         
@@ -575,11 +833,24 @@ public:
         const auto old_rhs_ind = rhs._index;
         
         variant tmp_rhs{std::move(rhs)};
-        _internal::apply_to_alternatives<0>(old_lhs_ind, _internal::move_construct_alternative{}, rhs._storage, this->_storage);
+        _internal::visit_impl(_internal::move_construct_alternative{}, old_lhs_ind, rhs._storage, this->_storage);
         rhs._storage = old_lhs_ind;
         
-        _internal::apply_to_alternatives<0>(old_rhs_ind, _internal::move_construct_alternative{}, this->_storage, tmp_rhs._storage);
+        _internal::visit_impl(_internal::move_construct_alternative{}, old_rhs_ind, this->_storage, tmp_rhs._storage);
         this->_index = old_rhs_ind;
+    }
+    
+    constexpr decltype(auto) _internal_base() & {
+        return static_cast<_internal::variant_base<Ts...>&>(*this);
+    }
+    constexpr decltype(auto) _internal_base() const & {
+        return static_cast<const _internal::variant_base<Ts...>&>(*this);
+    }
+    constexpr decltype(auto) _internal_base() && {
+        return static_cast<_internal::variant_base<Ts...>&&>(*this);
+    }
+    constexpr decltype(auto) _internal_base() const && {
+        return static_cast<const _internal::variant_base<Ts...>&&>(*this);
     }
     
 private:
@@ -593,6 +864,214 @@ private:
     }
 };
 
+// === holds_alternative
+template<typename T, typename... Ts>
+constexpr bool holds_alternative(const variant<Ts...>& v) noexcept {
+    static_assert(_internal::type_occurrence_count<T, Ts...>::value == 1, "T has occur in Ts exactly once");
+    return !v.valueless_by_exception() && v.index() == _internal::alternative_to_index<0, T, Ts...>::value;
 }
+
+// === get<I>
+template<::std::size_t I, typename... Ts>
+constexpr variant_alternative<I, variant<Ts...>>& get(variant<Ts...>& v) {
+    return *_internal::get_impl<I>(v._internal_base());
+}
+template<::std::size_t I, typename... Ts>
+constexpr variant_alternative<I, variant<Ts...>>&& get(variant<Ts...>&& v) {
+    return ::std::move(*_internal::get_impl<I>(v._internal_base()));
+}
+template<::std::size_t I, typename... Ts>
+constexpr const variant_alternative<I, variant<Ts...>>& get(const variant<Ts...>& v) {
+    return *_internal::get_impl<I>(v._internal_base());
+}
+template<::std::size_t I, typename... Ts>
+constexpr const variant_alternative<I, variant<Ts...>>&& get(const variant<Ts...>&& v) {
+    return ::std::move(*_internal::get_impl<I>(v._internal_base()));
+}
+
+// === get<T>
+template<typename T, typename... Ts>
+constexpr T& get(variant<Ts...>& v) {
+    return *_internal::get_impl<T>(v._internal_base());
+}
+template<typename T, typename... Ts>
+constexpr T&& get(variant<Ts...>&& v) {
+    return ::std::move(*_internal::get_impl<T>(v._internal_base()));
+}
+template<typename T, typename... Ts>
+constexpr const T& get(const variant<Ts...>& v) {
+    return *_internal::get_impl<T>(v._internal_base());
+}
+template<typename T, typename... Ts>
+constexpr const T&& get(const variant<Ts...>&& v) {
+    return ::std::move(*_internal::get_impl<T>(v._internal_base()));
+}
+
+// === get_if<I>
+template<::std::size_t I, typename... Ts>
+constexpr ::std::add_pointer_t<variant_alternative<I, variant<Ts...>>> get_if(variant<Ts...>* v) noexcept {
+    return v ? _internal::get_if_impl<I>(v->_internal_base()) : nullptr;
+}
+template<::std::size_t I, typename... Ts>
+constexpr ::std::add_pointer_t<const variant_alternative<I, variant<Ts...>>> get_if(const variant<Ts...>* v) noexcept {
+    return v ? _internal::get_if_impl<I>(v->_internal_base()) : nullptr;
+}
+
+// === get_if<T>
+template<typename T, typename... Ts>
+constexpr ::std::add_pointer_t<T> get_if(variant<Ts...>* v) noexcept {
+    return v ? _internal::get_if_impl<T>(v->_internal_base()) : nullptr;
+}
+template<typename T, typename... Ts>
+constexpr ::std::add_pointer_t<const T> get_if(const variant<Ts...>* v) noexcept {
+    return v ? _internal::get_if_impl<T>(v->_internal_base()) : nullptr;
+}
+
+// === variant relational ops
+template<typename... Ts, ::std::enable_if_t<conjunction_v<_internal::eq_test<Ts>...>, bool> = true>
+constexpr bool operator==(const variant<Ts...>& v, const variant<Ts...>& w) {
+    if (v.index() != w.index())
+        return false;
+    return v.index() == variant_npos || _internal::visit_impl<bool>(_internal::eq_alternative{}, v.index(), v._internal_base()._storage, w._internal_base()._storage);
+}
+template<typename... Ts, ::std::enable_if_t<conjunction_v<_internal::neq_test<Ts>...>, bool> = true>
+constexpr bool operator!=(const variant<Ts...>& v, const variant<Ts...>& w) {
+    if (v.index() != w.index())
+        return true;
+    return v.index() != variant_npos && _internal::visit_impl<bool>(_internal::neq_alternative{}, v.index(), v._internal_base()._storage, w._internal_base()._storage);
+}
+template<typename... Ts, ::std::enable_if_t<conjunction_v<_internal::less_test<Ts>...>, bool> = true>
+constexpr bool operator<(const variant<Ts...>& v, const variant<Ts...>& w) {
+    if (v.index() != w.index())
+        return false;
+    return v.index() == variant_npos || _internal::visit_impl<bool>(_internal::less_alternative{}, v.index(), v._internal_base()._storage, w._internal_base()._storage);
+}
+template<typename... Ts, ::std::enable_if_t<conjunction_v<_internal::greater_test<Ts>...>, bool> = true>
+constexpr bool operator>(const variant<Ts...>& v, const variant<Ts...>& w) {
+    if (v.index() != w.index())
+        return false;
+    return v.index() == variant_npos || _internal::visit_impl<bool>(_internal::greater_alternative{}, v.index(), v._internal_base()._storage, w._internal_base()._storage);
+}
+template<typename... Ts, ::std::enable_if_t<conjunction_v<_internal::leq_test<Ts>...>, bool> = true>
+constexpr bool operator<=(const variant<Ts...>& v, const variant<Ts...>& w) {
+    if (v.index() != w.index())
+        return false;
+    return v.index() == variant_npos || _internal::visit_impl<bool>(_internal::leq_alternative{}, v.index(), v._internal_base()._storage, w._internal_base()._storage);
+}
+template<typename... Ts, ::std::enable_if_t<conjunction_v<_internal::geq_test<Ts>...>, bool> = true>
+constexpr bool operator>=(const variant<Ts...>& v, const variant<Ts...>& w) {
+    if (v.index() != w.index())
+        return false;
+    return v.index() == variant_npos || _internal::visit_impl<bool>(_internal::geq_alternative{}, v.index(), v._internal_base()._storage, w._internal_base()._storage);
+}
+
+// TODO: c++20 spaceship
+
+namespace _internal { // >>> internal
+
+template<typename Visitor_T, typename Expected_T, typename Arg_Accum_T, typename... Variant_Ts>
+struct verify_invoke_rets;
+
+template<
+    typename Visitor_T,
+    typename Expected_T,
+    typename... Arg_Ts,
+    ::std::size_t... Is, typename Var_T,
+    typename... Variant_Ts
+>
+struct verify_invoke_rets<
+    Visitor_T,
+    Expected_T,
+    alt_visitor_accumulator<Arg_Ts...>,
+    alt_visitor_arg<::std::index_sequence<Is...>, Var_T>,
+    Variant_Ts...
+> : conjunction<
+    verify_invoke_rets<
+        Expected_T,
+        alt_visitor_accumulator<Arg_Ts..., decltype(get<Is>(::std::declval<Var_T>()))>,
+        Variant_Ts...
+    >
+...> {};
+
+template<typename Visitor_T, typename Expected_T, typename... Arg_Ts>
+struct verify_invoke_rets<Visitor_T, Expected_T, alt_visitor_accumulator<Arg_Ts...>> : ::std::is_same<
+    Expected_T,
+    decltype(::std::invoke(::std::declval<Visitor_T>(), ::std::declval<Arg_Ts>()...))
+> {};
+
+} // <<< internal
+
+// === visit
+template<typename Ret_T, typename Visitor, typename... Variants>
+constexpr Ret_T visit(Visitor&& vis, Variants&&... vars) {
+    bool has_valueless = false;
+    
+    using dummy_t = bool[];
+    static_cast<void>(dummy_t{(has_valueless = has_valueless || vars.valueless_by_exception())...});
+    if (has_valueless)
+        throw bad_variant_access{};
+    
+    const ::std::array<::std::size_t, sizeof...(Variants)> indices{vars._internal_base()._index...};
+    return _internal::visit_impl<Ret_T>(::std::forward<Visitor>(vis), indices, ::std::forward<Variants>(vars)._internal_base()._storage...);
+}
+template<typename Visitor, typename... Variants>
+constexpr decltype(auto) visit(Visitor&& vis, Variants&&... vars) {
+    using ret_t = decltype(::std::invoke(::std::declval<Visitor>(), get<0>(::std::declval<Variants>()...)));
+    static_assert(_internal::verify_invoke_rets<Visitor, ret_t, _internal::alt_visitor_accumulator<>, Variants...>::value, "All invoke results have to match");
+    return visit<ret_t>(::std::forward<Visitor>(vis), ::std::forward<Variants>(vars)...);
+}
+
+namespace _internal { // >>> internal
+
+template<typename, typename = void>
+struct variant_hash_base {};
+
+template<typename... Ts>
+struct variant_hash_base<
+    variant<Ts...>,
+    ::std::enable_if_t<
+        conjunction_v<::std::is_copy_constructible<::std::hash<::std::remove_cv_t<Ts>>>...> &&
+        conjunction_v<::std::is_destructible<::std::hash<::std::remove_cv_t<Ts>>>...> &&
+        conjunction_v<::std::is_copy_assignable<::std::hash<::std::remove_cv_t<Ts>>>...> &&
+        conjunction_v<is_swappable<::std::hash<::std::remove_cv_t<Ts>>>...> &&
+        conjunction_v<::std::is_same<::std::size_t, decltype(::std::hash<::std::remove_cv<Ts>>{}(::std::declval<Ts>()))...>>
+    >
+>
+{
+    constexpr ::std::size_t operator()(const variant<Ts...>& v) const {
+        if (v.valueless_by_exception())
+            return 0;
+        return visit<::std::size_t>(hash_alternative{}, v);
+    }
+};
+
+} // <<< internal
+
+}
+
+namespace std { // >>> std
+
+// === swap
+template<typename... Ts,
+    ::std::enable_if_t<
+        ::idym::conjunction_v<::std::is_move_constructible<Ts>...> &&
+        ::idym::conjunction_v<::idym::is_swappable<Ts...>>,
+    bool> = true
+>
+constexpr void swap(::idym::variant<Ts...>& lhs, ::idym::variant<Ts...>& rhs) noexcept(noexcept(lhs.swap(rhs))) {
+    lhs.swap(rhs);
+}
+
+template<typename... Ts>
+struct hash<::idym::variant<Ts...>> : ::idym::_internal::variant_hash_base<::idym::variant<Ts...>> {};
+
+template<>
+struct hash<::idym::monostate> {
+    inline constexpr ::std::size_t operator()(::idym::monostate) const {
+        return 0;
+    }
+};
+
+} // <<< std
 
 #endif
