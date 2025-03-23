@@ -79,6 +79,27 @@ union variant_storage_impl<false, T, Ts...> {
 };
 
 // === internal get
+template<typename Lhs_T, typename Rhs_T>
+struct ddispatch_var_pair {
+    using underlying_t = remove_cvref_t<Lhs_T>;
+    
+    Lhs_T lhs;
+    Rhs_T rhs;
+};
+template<typename Storage_T>
+struct var_size {
+    static constexpr ::std::size_t size = Storage_T::size;
+};
+template<typename Lhs_T, typename Rhs_T>
+struct var_size<ddispatch_var_pair<Lhs_T, Rhs_T>> {
+    static constexpr ::std::size_t size = remove_cvref_t<Lhs_T>::size;
+};
+
+template<typename Lhs_T, typename Rhs_T>
+constexpr auto make_ddispatch_pair(Lhs_T&& lhs, Rhs_T&& rhs) {
+    return ddispatch_var_pair<decltype(::std::forward<Lhs_T>(lhs)), decltype(::std::forward<Rhs_T>(rhs))>{::std::forward<Lhs_T>(lhs), ::std::forward<Rhs_T>(rhs)};
+}
+
 template<::std::size_t I>
 struct get_variant_storage {
     template<typename Storage_T>
@@ -89,6 +110,10 @@ struct get_variant_storage {
     static constexpr decltype(auto) do_get_ref(Storage_T&& storage) {
         return get_variant_storage<I - 1>::do_get_ref(storage.v1);
     }
+    template<typename Lhs_T, typename Rhs_T>
+    static constexpr decltype(auto) do_get_ref(ddispatch_var_pair<Lhs_T, Rhs_T>&& storage_pair) {
+        return get_variant_storage<I - 1>::do_get_ref(make_ddispatch_pair(::std::forward<Lhs_T>(storage_pair.lhs).v1, ::std::forward<Rhs_T>(storage_pair.rhs).v1));
+    }
 };
 template<>
 struct get_variant_storage<0> {
@@ -98,20 +123,31 @@ struct get_variant_storage<0> {
     }
     template<typename Storage_T>
     static constexpr decltype(auto) do_get_ref(Storage_T&& storage) {
-        return ::std::forward<Storage_T>(storage).v0;
+        return (::std::forward<Storage_T>(storage).v0);
+    }
+    template<typename Lhs_T, typename Rhs_T>
+    static constexpr decltype(auto) do_get_ref(ddispatch_var_pair<Lhs_T, Rhs_T>&& storage_pair) {
+        return make_ddispatch_pair(::std::forward<Lhs_T>(storage_pair.lhs).v0, ::std::forward<Rhs_T>(storage_pair.rhs).v0);
     }
 };
 
 // === visitor
-template<typename Ret_T, ::std::size_t... Is, typename... Storage_Ts, typename Visitor_T>
-constexpr Ret_T dispatch_variant_storage(Visitor_T visitor, Storage_Ts... vs) {
-    return ::std::forward<decltype(visitor)>(visitor)(get_variant_storage<Is>::do_get_ref(::std::forward<decltype(vs)>(vs))...);
-}
+template<typename Ret_T, typename Is_Sequence_T, typename Visitor_T, typename... Storage_Ts>
+struct dispatch_variant_storage;
+
+template<typename Ret_T, ::std::size_t... Is, typename Visitor_T, typename... Storage_Ts>
+struct dispatch_variant_storage<Ret_T, ::std::index_sequence<Is...>, Visitor_T, Storage_Ts...> {
+    static constexpr Ret_T do_dispatch(Visitor_T visitor, Storage_Ts... vs) {
+        ::std::forward<decltype(visitor)>(visitor)(get_variant_storage<Is>::do_get_ref(::std::forward<decltype(vs)>(vs))...);
+    }
+};
 
 template<typename Ret_T, typename Visitor_T, typename... Storage_Ts, ::std::size_t... Is, ::std::size_t... Sequence_Is>
 constexpr auto make_dispatch_table(::std::index_sequence<Is...>, ::std::index_sequence<Sequence_Is...>) {
-    using dispatch_t = decltype(dispatch_variant_storage<Ret_T, Sequence_Is..., 0, Storage_Ts..., Visitor_T>);
-    return ::std::array<dispatch_t*, sizeof...(Is)>{dispatch_variant_storage<Ret_T, Sequence_Is..., Is, Storage_Ts..., Visitor_T>...};
+    using dispatch_t = dispatch_variant_storage<Ret_T, ::std::index_sequence<Sequence_Is..., 0>, Visitor_T, Storage_Ts...>;
+    return ::std::array<
+        decltype(dispatch_t::do_dispatch)*, sizeof...(Is)
+    >{dispatch_variant_storage<Ret_T, ::std::index_sequence<Sequence_Is..., Is>, Visitor_T, Storage_Ts...>::do_dispatch...};
 }
 
 template<typename Alt_Indices, typename Src_Type>
@@ -194,7 +230,7 @@ constexpr decltype(auto) visit_impl(Visitor_T&& visitor, const ::std::array<::st
         alt_visitor_accumulator<>,
         ::std::index_sequence<>,
         decltype(::std::forward<Visitor_T>(visitor)),
-        alt_visitor_arg<::std::make_index_sequence<remove_cvref_t<Storage_Ts>::size>, decltype(::std::forward<Storage_Ts>(vs))>...
+        alt_visitor_arg<::std::make_index_sequence<var_size<remove_cvref_t<Storage_Ts>>::size>, decltype(::std::forward<Storage_Ts>(vs))>...
     >;
     
     constexpr auto dispatch_table = dispatcher_t::dispatch_table;
@@ -202,12 +238,14 @@ constexpr decltype(auto) visit_impl(Visitor_T&& visitor, const ::std::array<::st
     return dispatch_fun(::std::forward<Visitor_T>(visitor), ::std::forward<Storage_Ts>(vs)...);
 }
 
-template<typename Ret_T = void, typename Visitor_T, typename... Storage_Ts>
-constexpr decltype(auto) visit_impl(Visitor_T&& visitor, ::std::size_t index, Storage_Ts&&... vs) {
-    ::std::array<::std::size_t, sizeof...(Storage_Ts)> indices;
-    for (auto& arr_index : indices)
-        arr_index = index;
-    return visit_impl<Ret_T>(::std::forward<Visitor_T>(visitor), indices, ::std::forward<Storage_Ts>(vs)...);
+template<typename Ret_T = void, typename Visitor_T, typename Storage_T>
+constexpr decltype(auto) visit_impl(Visitor_T&& visitor, ::std::size_t index, Storage_T&& v) {
+    return visit_impl<Ret_T>(::std::forward<Visitor_T>(visitor), ::std::array<::std::size_t, 1>{index}, ::std::forward<Storage_T>(v));
+}
+template<typename Ret_T = void, typename Visitor_T, typename Storage_T1, typename Storage_T2>
+constexpr decltype(auto) visit_impl(Visitor_T&& visitor, ::std::size_t index, Storage_T1&& v1, Storage_T2&& v2) {
+    const ::std::array<::std::size_t, 1> indices{index};
+    return visit_impl<Ret_T>(::std::forward<Visitor_T>(visitor), indices, make_ddispatch_pair(::std::forward<Storage_T1>(v1), ::std::forward<Storage_T2>(v2)));
 }
 
 // === generic constructor callables, to be applied with the function above
@@ -218,71 +256,71 @@ struct destroy_alternative {
     }
 };
 struct copy_construct_alternative {
-    template<typename Container_T>
-    constexpr void operator()(Container_T& lhs, const Container_T& rhs) const {
-        ::new (&lhs) Container_T{rhs};
+    template<typename Pair_T>
+    constexpr void operator()(const Pair_T& pair) const {
+        ::new (&pair.lhs) typename Pair_T::underlying_t{pair.rhs};
     }
 };
 struct move_construct_alternative {
-    template<typename Container_T>
-    constexpr void operator()(Container_T& lhs, Container_T& rhs) const {
-        ::new (&lhs) Container_T{::std::move(rhs)};
+    template<typename Pair_T>
+    constexpr void operator()(const Pair_T& pair) const {
+        ::new (&pair.lhs) typename Pair_T::underlying_t{::std::move(pair.rhs)};
     }
 };
 struct copy_assign_alternative {
-    template<typename Container_T>
-    constexpr void operator()(Container_T& lhs, const Container_T& rhs) const {
-        lhs = rhs;
+    template<typename Pair_T>
+    constexpr void operator()(const Pair_T& pair) const {
+        pair.lhs = pair.rhs;
     }
 };
 struct move_assign_alternative {
-    template<typename Container_T>
-    constexpr void operator()(Container_T& lhs, Container_T& rhs) const {
-        lhs = ::std::move(rhs);
+    template<typename Pair_T>
+    constexpr void operator()(const Pair_T& pair) const {
+        pair.lhs = ::std::move(pair.rhs);
     }
 };
 struct swap_alternative {
-    template<typename Container_T>
-    constexpr void operator()(Container_T& lhs, Container_T& rhs) const {
+    template<typename Pair_T>
+    constexpr void operator()(const Pair_T& pair) const {
         using ::std::swap;
-        swap(lhs, rhs);
+        swap(pair.lhs, pair.rhs);
     }
 };
 
 struct eq_alternative {
-    template<typename Container_T>
-    constexpr bool operator()(const Container_T& lhs, Container_T& rhs) const {
-        return lhs == rhs;
+    template<typename Pair_T>
+    constexpr bool operator()(const Pair_T& pair) const {
+        return pair.lhs == pair.rhs;
     }
 };
 struct neq_alternative {
-    template<typename Container_T>
-    constexpr bool operator()(const Container_T& lhs, Container_T& rhs) const {
-        return lhs != rhs;
+    template<typename Pair_T>
+    constexpr bool operator()(const Pair_T& pair) const {
+        return pair.lhs != pair.rhs;
     }
 };
 struct less_alternative {
-    template<typename Container_T>
-    constexpr bool operator()(const Container_T& lhs, Container_T& rhs) const {
-        return lhs < rhs;
+    template<typename Pair_T>
+    constexpr bool operator()(const Pair_T& pair) const {
+        return pair.lhs < pair.rhs;
     }
 };
 struct greater_alternative {
-    template<typename Container_T>
-    constexpr bool operator()(const Container_T& lhs, Container_T& rhs) const {
-        return lhs > rhs;
+    template<typename Pair_T>
+    constexpr bool operator()(const Pair_T& pair) const {
+        return pair.lhs > pair.rhs;
     }
 };
 struct leq_alternative {
-    template<typename Container_T>
-    constexpr bool operator()(const Container_T& lhs, Container_T& rhs) const {
-        return lhs <= rhs;
+    template<typename Pair_T>
+    constexpr bool operator()(const Pair_T& pair) const {
+        return pair.lhs <= pair.rhs;
     }
 };
 struct geq_alternative {
-    template<typename Container_T>
-    constexpr bool operator()(const Container_T& lhs, Container_T& rhs) const {
-        return lhs >= rhs;
+    template<typename Pair_T>
+    constexpr bool operator()(const Pair_T& pair) const {
+        return pair.lhs >= pair.rhs;
     }
 };
 struct hash_alternative {
@@ -307,7 +345,7 @@ constexpr auto& assign_variants(Var_Lhs&& lhs, Var_Rhs&& rhs, Ctor_Fun ctor, Ass
         visit_impl(ass, lhs._index, lhs._storage, rhs._storage);
     } else {
         if (lhs._index != variant_npos) {
-            destroy_alternative(lhs._index, destroy_alternative{}, lhs._storage);
+            visit_impl(destroy_alternative{}, lhs._index, lhs._storage);
             lhs._index = variant_npos;
         }
         
@@ -326,6 +364,26 @@ struct variant_base {
     ::std::size_t _index = variant_npos;
 };
 
+// MSVC's __is_constructible struggles with a sfinaed out default ctor, fix below
+template<typename... Ts>
+constexpr bool var_def_ctor_nothrow_v = ::std::is_nothrow_default_constructible<_internal::first_of_t<Ts...>>::value;
+
+template<bool, typename...>
+struct variant_base_def_ctor;
+
+template<typename T, typename... Ts>
+struct variant_base_def_ctor<true, T, Ts...> : variant_base<T, Ts...> {
+    constexpr variant_base_def_ctor() noexcept(var_def_ctor_nothrow_v<T>) {
+        ::new (&this->_storage.v0) T{};
+        this->_index = 0;
+    }
+};
+
+template<typename... Ts>
+struct variant_base_def_ctor<false, Ts...> : variant_base<Ts...> {
+    variant_base_def_ctor() = delete;
+};
+
 /*
  * For each base, the first bool is:
  * - true for trivial OR deleted
@@ -335,8 +393,8 @@ struct variant_base {
 template<bool, typename...>
 struct variant_base_dtor;
 
-template<typename... Ts>
-struct variant_base_dtor<true, Ts...> : variant_base<Ts...> {};
+template<typename T, typename... Ts>
+struct variant_base_dtor<true, T, Ts...> : variant_base_def_ctor<::std::is_default_constructible<T>::value, T, Ts...> {};
 
 template<typename... Ts>
 struct variant_base_dtor<false, Ts...> : variant_base_dtor<true, Ts...> {
@@ -358,6 +416,7 @@ struct variant_base_copy_ctor<true, Ts...> : variant_base_dtor<
 
 template<typename... Ts>
 struct variant_base_copy_ctor<false, Ts...> : variant_base_copy_ctor<true, Ts...> {
+    constexpr variant_base_copy_ctor() = default;
     constexpr variant_base_copy_ctor(const variant_base_copy_ctor& other) {
         if (other._index == variant_npos)
             return;
@@ -372,18 +431,18 @@ struct variant_base_move_ctor;
 
 template<typename... Ts>
 struct variant_base_move_ctor<true, Ts...> : variant_base_copy_ctor<
-    conjunction_v<::std::is_trivially_copy_constructible<Ts>...>,
+    conjunction_v<::std::is_trivially_copy_constructible<Ts>...> || !conjunction_v<::std::is_copy_constructible<Ts>...>,
     Ts...
 >
 {
-    constexpr variant_base_move_ctor() = default;
+    constexpr variant_base_move_ctor() noexcept(var_def_ctor_nothrow_v<Ts...>) = default;
     constexpr variant_base_move_ctor(const variant_base_move_ctor&) = default;
     constexpr variant_base_move_ctor(variant_base_move_ctor&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
 };
 
 template<typename... Ts>
 struct variant_base_move_ctor<false, Ts...> : variant_base_move_ctor<true, Ts...> {
-    constexpr variant_base_move_ctor() = default;
+    constexpr variant_base_move_ctor() noexcept(var_def_ctor_nothrow_v<Ts...>) = default;
     constexpr variant_base_move_ctor(const variant_base_move_ctor&) = default;
     constexpr variant_base_move_ctor(variant_base_move_ctor&& other) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) {
         if (other._index == variant_npos)
@@ -405,7 +464,7 @@ struct variant_base_copy_ass<true, Ts...> : variant_base_move_ctor<
 
 template<typename... Ts>
 struct variant_base_copy_ass<false, Ts...> : variant_base_move_ctor<true, Ts...> {
-    constexpr variant_base_copy_ass() = default;
+    constexpr variant_base_copy_ass() noexcept(var_def_ctor_nothrow_v<Ts...>) = default;
     constexpr variant_base_copy_ass(const variant_base_copy_ass&) = default;
     constexpr variant_base_copy_ass(variant_base_copy_ass&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
 
@@ -430,7 +489,7 @@ struct variant_base_move_ass<true, Ts...> : variant_base_copy_ass<
 {
     static constexpr auto ass_nothrow = conjunction_v<::std::is_nothrow_move_constructible<Ts>...> && conjunction_v<::std::is_nothrow_move_assignable<Ts>...>;
     
-    constexpr variant_base_move_ass() = default;
+    constexpr variant_base_move_ass() noexcept(var_def_ctor_nothrow_v<Ts...>) = default;
     constexpr variant_base_move_ass(const variant_base_move_ass&) = default;
     constexpr variant_base_move_ass(variant_base_move_ass&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
     constexpr variant_base_move_ass& operator=(const variant_base_move_ass&) = default;
@@ -439,7 +498,7 @@ struct variant_base_move_ass<true, Ts...> : variant_base_copy_ass<
 
 template<typename... Ts>
 struct variant_base_move_ass<false, Ts...> : variant_base_move_ass<true, Ts...> {
-    constexpr variant_base_move_ass() = default;
+    constexpr variant_base_move_ass() noexcept(var_def_ctor_nothrow_v<Ts...>) = default;
     constexpr variant_base_move_ass(const variant_base_move_ass&) = default;
     constexpr variant_base_move_ass(variant_base_move_ass&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
     constexpr variant_base_move_ass& operator=(const variant_base_move_ass&) = default;
@@ -549,7 +608,7 @@ struct type_occurrence_count<T, variant_base<Ts...>> : type_occurrence_count<T, 
 
 // === alternative constructor
 template<::std::size_t I, typename... Alt_Ts, typename... Ts>
-constexpr auto* init_alternative_at(variant_base<Alt_Ts...>&& storage, Ts&&... args) {
+constexpr auto* init_alternative_at(variant_base<Alt_Ts...>& storage, Ts&&... args) {
     auto* alt_ptr = get_variant_storage<I>::do_get(storage._storage);
     ::new (alt_ptr) ::std::remove_pointer_t<decltype(alt_ptr)>(std::forward<Ts>(args)...);
     storage._index = I;
@@ -652,11 +711,7 @@ class variant : _internal::variant_base_final<Ts...> {
     static_assert(sizeof...(Ts) > 0, "Variant must have at least one alternative");
     
 public:
-    template<::std::enable_if_t<::std::is_default_constructible<_internal::first_of_t<Ts...>>::value, bool> = true>
-    constexpr variant() noexcept(::std::is_nothrow_default_constructible<_internal::first_of_t<Ts...>>::value) {
-        ::new (&this->_storage.v0) _internal::first_of_t<Ts...>{};
-        this->_index = 0;
-    }
+    constexpr variant() noexcept(_internal::var_def_ctor_nothrow_v<Ts...>) = default;
     
     template<
         typename T,
@@ -776,7 +831,7 @@ public:
             ::std::is_constructible<_internal::index_to_alternative_t<I, Ts...>, Args...>::value,
         bool> = true
     >
-    constexpr variant_alternative<I, variant<Ts...>>& emplace(Args&&... args) {
+    constexpr variant_alternative_t<I, variant<Ts...>>& emplace(Args&&... args) {
         static_assert(I < sizeof...(Ts), "I is required to be less than the alternative count");
         if (this->_index != variant_npos) {
             _internal::visit_impl(_internal::destroy_alternative{}, this->_index, this->_storage);
@@ -793,7 +848,7 @@ public:
             ::std::is_constructible<_internal::index_to_alternative_t<I, Ts...>, ::std::initializer_list<U>&, Args...>::value,
         bool> = true
     >
-    constexpr variant_alternative<I, variant<Ts...>>& emplace(::std::initializer_list<U> il, Args&&... args) {
+    constexpr variant_alternative_t<I, variant<Ts...>>& emplace(::std::initializer_list<U> il, Args&&... args) {
         static_assert(I < sizeof...(Ts), "I is required to be less than the alternative count");
         if (this->_index != variant_npos) {
             _internal::visit_impl(_internal::destroy_alternative{}, this->_index, this->_storage);
@@ -873,19 +928,19 @@ constexpr bool holds_alternative(const variant<Ts...>& v) noexcept {
 
 // === get<I>
 template<::std::size_t I, typename... Ts>
-constexpr variant_alternative<I, variant<Ts...>>& get(variant<Ts...>& v) {
+constexpr variant_alternative_t<I, variant<Ts...>>& get(variant<Ts...>& v) {
     return *_internal::get_impl<I>(v._internal_base());
 }
 template<::std::size_t I, typename... Ts>
-constexpr variant_alternative<I, variant<Ts...>>&& get(variant<Ts...>&& v) {
+constexpr variant_alternative_t<I, variant<Ts...>>&& get(variant<Ts...>&& v) {
     return ::std::move(*_internal::get_impl<I>(v._internal_base()));
 }
 template<::std::size_t I, typename... Ts>
-constexpr const variant_alternative<I, variant<Ts...>>& get(const variant<Ts...>& v) {
+constexpr const variant_alternative_t<I, variant<Ts...>>& get(const variant<Ts...>& v) {
     return *_internal::get_impl<I>(v._internal_base());
 }
 template<::std::size_t I, typename... Ts>
-constexpr const variant_alternative<I, variant<Ts...>>&& get(const variant<Ts...>&& v) {
+constexpr const variant_alternative_t<I, variant<Ts...>>&& get(const variant<Ts...>&& v) {
     return ::std::move(*_internal::get_impl<I>(v._internal_base()));
 }
 
@@ -909,11 +964,11 @@ constexpr const T&& get(const variant<Ts...>&& v) {
 
 // === get_if<I>
 template<::std::size_t I, typename... Ts>
-constexpr ::std::add_pointer_t<variant_alternative<I, variant<Ts...>>> get_if(variant<Ts...>* v) noexcept {
+constexpr ::std::add_pointer_t<variant_alternative_t<I, variant<Ts...>>> get_if(variant<Ts...>* v) noexcept {
     return v ? _internal::get_if_impl<I>(v->_internal_base()) : nullptr;
 }
 template<::std::size_t I, typename... Ts>
-constexpr ::std::add_pointer_t<const variant_alternative<I, variant<Ts...>>> get_if(const variant<Ts...>* v) noexcept {
+constexpr ::std::add_pointer_t<const variant_alternative_t<I, variant<Ts...>>> get_if(const variant<Ts...>* v) noexcept {
     return v ? _internal::get_if_impl<I>(v->_internal_base()) : nullptr;
 }
 
