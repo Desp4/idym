@@ -364,26 +364,6 @@ struct variant_base {
     ::std::size_t _index = variant_npos;
 };
 
-// MSVC's __is_constructible struggles with a sfinaed out default ctor, fix below
-template<typename... Ts>
-constexpr bool var_def_ctor_nothrow_v = ::std::is_nothrow_default_constructible<_internal::first_of_t<Ts...>>::value;
-
-template<bool, typename...>
-struct variant_base_def_ctor;
-
-template<typename T, typename... Ts>
-struct variant_base_def_ctor<true, T, Ts...> : variant_base<T, Ts...> {
-    constexpr variant_base_def_ctor() noexcept(var_def_ctor_nothrow_v<T>) {
-        ::new (&this->_storage.v0) T{};
-        this->_index = 0;
-    }
-};
-
-template<typename... Ts>
-struct variant_base_def_ctor<false, Ts...> : variant_base<Ts...> {
-    variant_base_def_ctor() = delete;
-};
-
 /*
  * For each base, the first bool is:
  * - true for trivial OR deleted
@@ -393,8 +373,8 @@ struct variant_base_def_ctor<false, Ts...> : variant_base<Ts...> {
 template<bool, typename...>
 struct variant_base_dtor;
 
-template<typename T, typename... Ts>
-struct variant_base_dtor<true, T, Ts...> : variant_base_def_ctor<::std::is_default_constructible<T>::value, T, Ts...> {};
+template<typename... Ts>
+struct variant_base_dtor<true, Ts...> : variant_base<Ts...> {};
 
 template<typename... Ts>
 struct variant_base_dtor<false, Ts...> : variant_base_dtor<true, Ts...> {
@@ -435,14 +415,14 @@ struct variant_base_move_ctor<true, Ts...> : variant_base_copy_ctor<
     Ts...
 >
 {
-    constexpr variant_base_move_ctor() noexcept(var_def_ctor_nothrow_v<Ts...>) = default;
+    constexpr variant_base_move_ctor() = default;
     constexpr variant_base_move_ctor(const variant_base_move_ctor&) = default;
     constexpr variant_base_move_ctor(variant_base_move_ctor&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
 };
 
 template<typename... Ts>
 struct variant_base_move_ctor<false, Ts...> : variant_base_move_ctor<true, Ts...> {
-    constexpr variant_base_move_ctor() noexcept(var_def_ctor_nothrow_v<Ts...>) = default;
+    constexpr variant_base_move_ctor() = default;
     constexpr variant_base_move_ctor(const variant_base_move_ctor&) = default;
     constexpr variant_base_move_ctor(variant_base_move_ctor&& other) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) {
         if (other._index == variant_npos)
@@ -452,18 +432,45 @@ struct variant_base_move_ctor<false, Ts...> : variant_base_move_ctor<true, Ts...
     }
 };
 
+// === MSVC's __is_constructible struggles with a sfinaed out default ctor, fix below
+template<typename... Ts>
+constexpr bool var_def_ctor_nothrow_v = ::std::is_nothrow_default_constructible<_internal::first_of_t<Ts...>>::value;
+
+template<bool, typename...>
+struct variant_base_def_ctor;
+
+template<typename... Ts>
+struct variant_base_def_ctor<true, Ts...> : variant_base_move_ctor<
+    conjunction_v<::std::is_trivially_move_constructible<Ts>...> || !conjunction_v<::std::is_move_constructible<Ts>...>,
+    Ts...
+>
+{
+    constexpr variant_base_def_ctor() noexcept(var_def_ctor_nothrow_v<first_of_t<Ts...>>) {
+        ::new (&this->_storage.v0) first_of_t<Ts...>{};
+        this->_index = 0;
+    }
+};
+
+template<typename... Ts>
+struct variant_base_def_ctor<false, Ts...> : variant_base_move_ctor<
+    conjunction_v<::std::is_trivially_move_constructible<Ts>...> || !conjunction_v<::std::is_move_constructible<Ts>...>,
+    Ts...
+> {
+    variant_base_def_ctor() = delete;
+};
+
 // === variant_base_copy_ass
 template<bool, typename...>
 struct variant_base_copy_ass;
 
-template<typename... Ts>
-struct variant_base_copy_ass<true, Ts...> : variant_base_move_ctor<
-    conjunction_v<::std::is_trivially_move_constructible<Ts>...> || !conjunction_v<::std::is_move_constructible<Ts>...>,
-    Ts...
+template<typename T, typename... Ts>
+struct variant_base_copy_ass<true, T, Ts...> : variant_base_def_ctor<
+    ::std::is_default_constructible<T>::value,
+    T, Ts...
 > {};
 
 template<typename... Ts>
-struct variant_base_copy_ass<false, Ts...> : variant_base_move_ctor<true, Ts...> {
+struct variant_base_copy_ass<false, Ts...> : variant_base_copy_ass<true, Ts...> {
     constexpr variant_base_copy_ass() noexcept(var_def_ctor_nothrow_v<Ts...>) = default;
     constexpr variant_base_copy_ass(const variant_base_copy_ass&) = default;
     constexpr variant_base_copy_ass(variant_base_copy_ass&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
@@ -531,7 +538,7 @@ template<::std::size_t I>
 struct instanceof_in_place_index<in_place_index_t<I>> : ::std::true_type {};
 
 // === varaint(T&&) and operator=(T&&) constraint deduction
-template<typename T>
+template<typename T, ::std::size_t Unique_I> // Unique_I to guard against inaccessible bases
 struct variant_overload {
     T operator()(T (&&)[1]);
 };
@@ -540,12 +547,15 @@ template<typename...>
 struct variant_overload_set;
 
 template<typename T, typename... Ts>
-struct variant_overload_set<T, Ts...> : variant_overload<T>, variant_overload_set<Ts...> {
-    using variant_overload<T>::operator();
+struct variant_overload_set<T, Ts...> : variant_overload<T, sizeof...(Ts)>, variant_overload_set<Ts...> {
+    using variant_overload<T, sizeof...(Ts)>::operator();
     using variant_overload_set<Ts...>::operator();
 };
 
-template<> struct variant_overload_set<> {};
+template<typename T>
+struct variant_overload_set<T> : variant_overload<T, 0> {
+    using variant_overload<T, 0>::operator();
+};
 
 template<typename Arg_T, typename... Ts>
 using variant_ctor_compat_t = decltype(::std::declval<variant_overload_set<Ts...>>()({::std::declval<Arg_T>()}));
