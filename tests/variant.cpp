@@ -173,6 +173,15 @@ void run_14_19() {
         ptr_ctor(void*) { throw test_exception{}; }
     };
     
+    struct move_copy_ctor {
+        move_copy_ctor(int init_value = 0) : value{init_value} {}
+        move_copy_ctor(const move_copy_ctor& other) : state_flag{1}, value{other.value} {}
+        move_copy_ctor(move_copy_ctor&& other) : state_flag{2}, value{other.value} {}
+        
+        int state_flag = 0;
+        int value = 0;
+    };
+    
     static_assert(std::is_constructible<variant<int_ctor, int, char_ctor>, char>::value, "variant.ctor.15");
     static_assert(!std::is_constructible<variant<int_ctor, char_ctor>, char>::value, "variant.ctor.15");
     static_assert(!std::is_constructible<variant<int_ctor, int_ctor>, int>::value, "variant.ctor.15");
@@ -181,8 +190,26 @@ void run_14_19() {
     static_assert(std::is_nothrow_constructible<variant<int, void*>, int>::value, "variant.ctor.19");
     static_assert(std::is_nothrow_constructible<variant<int_ctor, ptr_ctor>, int>::value, "variant.ctor.19");
     static_assert(!std::is_nothrow_constructible<variant<int_ctor, ptr_ctor>, void*>::value, "variant.ctor.19");
-    
-    // 1. forwarding(move/copy) 2. alt selection 3. exceptions
+
+    {
+        variant<void*, move_copy_ctor> v{42};
+        validate(idym::holds_alternative<move_copy_ctor>(v), "variant.ctor.17");
+        validate(idym::get<1>(v).value == 42, "variant.ctor.16");
+    }
+    {
+        move_copy_ctor value{42};
+        variant<void*, move_copy_ctor> v{std::move(value)};
+        validate(idym::holds_alternative<move_copy_ctor>(v), "variant.ctor.17");
+        validate(idym::get<1>(v).value == 42, "variant.ctor.17");
+        validate(idym::get<1>(v).state_flag == 2, "variant.ctor.17");
+    }
+    {
+        IDYM_VALIDATE_EXCEPTION("variant.ctor.18", variant<ptr_ctor, int>{nullptr});
+    }
+}
+void run_20_24()
+{
+
 }
 
 }
@@ -193,5 +220,6 @@ int main(int argc, char** argv) {
     variant_ctor::run_7_9();
     variant_ctor::run_10_13();
     variant_ctor::run_14_19();
+    variant_ctor::run_20_24();
     return 0;
 }

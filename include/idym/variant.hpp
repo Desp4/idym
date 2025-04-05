@@ -40,6 +40,9 @@ public:
 
 namespace _internal { // >>> internal
 
+// == dummy_t
+struct dummy_t {};
+
 // === first_of
 template<typename T, typename... Ts>
 struct first_of {
@@ -432,46 +435,19 @@ struct variant_base_move_ctor<false, Ts...> : variant_base_move_ctor<true, Ts...
     }
 };
 
-// === MSVC's __is_constructible struggles with a sfinaed out default ctor, fix below
-template<typename... Ts>
-constexpr bool var_def_ctor_nothrow_v = ::std::is_nothrow_default_constructible<_internal::first_of_t<Ts...>>::value;
-
-template<bool, typename...>
-struct variant_base_def_ctor;
-
-template<typename... Ts>
-struct variant_base_def_ctor<true, Ts...> : variant_base_move_ctor<
-    conjunction_v<::std::is_trivially_move_constructible<Ts>...> || !conjunction_v<::std::is_move_constructible<Ts>...>,
-    Ts...
->
-{
-    constexpr variant_base_def_ctor() noexcept(var_def_ctor_nothrow_v<first_of_t<Ts...>>) {
-        ::new (&this->_storage.v0) first_of_t<Ts...>{};
-        this->_index = 0;
-    }
-};
-
-template<typename... Ts>
-struct variant_base_def_ctor<false, Ts...> : variant_base_move_ctor<
-    conjunction_v<::std::is_trivially_move_constructible<Ts>...> || !conjunction_v<::std::is_move_constructible<Ts>...>,
-    Ts...
-> {
-    variant_base_def_ctor() = delete;
-};
-
 // === variant_base_copy_ass
 template<bool, typename...>
 struct variant_base_copy_ass;
 
-template<typename T, typename... Ts>
-struct variant_base_copy_ass<true, T, Ts...> : variant_base_def_ctor<
-    ::std::is_default_constructible<T>::value,
-    T, Ts...
+template<typename... Ts>
+struct variant_base_copy_ass<true, Ts...> : variant_base_move_ctor<
+    conjunction_v<::std::is_trivially_move_constructible<Ts>...> || !conjunction_v<::std::is_move_constructible<Ts>...>,
+    Ts...
 > {};
 
 template<typename... Ts>
 struct variant_base_copy_ass<false, Ts...> : variant_base_copy_ass<true, Ts...> {
-    constexpr variant_base_copy_ass() noexcept(var_def_ctor_nothrow_v<Ts...>) = default;
+    constexpr variant_base_copy_ass() = default;
     constexpr variant_base_copy_ass(const variant_base_copy_ass&) = default;
     constexpr variant_base_copy_ass(variant_base_copy_ass&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
 
@@ -495,8 +471,8 @@ struct variant_base_move_ass<true, Ts...> : variant_base_copy_ass<
 >
 {
     static constexpr auto ass_nothrow = conjunction_v<::std::is_nothrow_move_constructible<Ts>...> && conjunction_v<::std::is_nothrow_move_assignable<Ts>...>;
-    
-    constexpr variant_base_move_ass() noexcept(var_def_ctor_nothrow_v<Ts...>) = default;
+
+    constexpr variant_base_move_ass() = default;
     constexpr variant_base_move_ass(const variant_base_move_ass&) = default;
     constexpr variant_base_move_ass(variant_base_move_ass&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
     constexpr variant_base_move_ass& operator=(const variant_base_move_ass&) = default;
@@ -505,7 +481,7 @@ struct variant_base_move_ass<true, Ts...> : variant_base_copy_ass<
 
 template<typename... Ts>
 struct variant_base_move_ass<false, Ts...> : variant_base_move_ass<true, Ts...> {
-    constexpr variant_base_move_ass() noexcept(var_def_ctor_nothrow_v<Ts...>) = default;
+    constexpr variant_base_move_ass() = default;
     constexpr variant_base_move_ass(const variant_base_move_ass&) = default;
     constexpr variant_base_move_ass(variant_base_move_ass&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
     constexpr variant_base_move_ass& operator=(const variant_base_move_ass&) = default;
@@ -515,14 +491,48 @@ struct variant_base_move_ass<false, Ts...> : variant_base_move_ass<true, Ts...> 
     }
 };
 
-// === variant_base_final
+// === MSVC's __is_constructible struggles with a sfinaed out default ctor, fix below
 template<typename... Ts>
-using variant_base_final = variant_base_move_ass<
+constexpr bool var_def_ctor_nothrow_v = ::std::is_nothrow_default_constructible<_internal::first_of_t<Ts...>>::value;
+
+template<bool, typename...>
+struct variant_base_def_ctor;
+
+template<typename... Ts>
+struct variant_base_def_ctor<true, Ts...> : variant_base_move_ass<
     (
         conjunction_v<::std::is_trivially_move_constructible<Ts>...> &&
         conjunction_v<::std::is_trivially_move_assignable<Ts>...> &&
         conjunction_v<::std::is_trivially_destructible<Ts>...>
     ) || (!conjunction_v<::std::is_move_constructible<Ts>...> || !conjunction_v<::std::is_move_assignable<Ts>...>),
+    Ts...
+>
+{
+    constexpr variant_base_def_ctor() noexcept(var_def_ctor_nothrow_v<first_of_t<Ts...>>) {
+        ::new (&this->_storage.v0) first_of_t<Ts...>{};
+        this->_index = 0;
+    }
+    constexpr variant_base_def_ctor(dummy_t) {} 
+};
+
+template<typename... Ts>
+struct variant_base_def_ctor<false, Ts...> : variant_base_move_ass<
+    (
+        conjunction_v<::std::is_trivially_move_constructible<Ts>...> &&
+        conjunction_v<::std::is_trivially_move_assignable<Ts>...> &&
+        conjunction_v<::std::is_trivially_destructible<Ts>...>
+    ) || (!conjunction_v<::std::is_move_constructible<Ts>...> || !conjunction_v<::std::is_move_assignable<Ts>...>),
+    Ts...
+>
+{
+    variant_base_def_ctor() = delete;
+    constexpr variant_base_def_ctor(dummy_t) {}
+};
+
+// === variant_base_final
+template<typename... Ts>
+using variant_base_final = variant_base_def_ctor<
+    ::std::is_default_constructible<first_of_t<Ts...>>::value,
     Ts...
 >;
 
@@ -746,7 +756,7 @@ public:
             ::std::is_constructible<T, Args...>::value,
         bool> = true
     >
-    constexpr explicit variant(in_place_type_t<T>, Args&&... args) {
+    constexpr explicit variant(in_place_type_t<T>, Args&&... args) : variant{_internal::dummy_t{}} {
         _internal::init_alternative_at<_internal::alternative_to_index<0, T, Ts...>::value>(*this, std::forward<Args>(args)...);
     }
 
@@ -757,7 +767,7 @@ public:
             ::std::is_constructible<T, ::std::initializer_list<U>&, Args...>::value,
         bool> = true
     >
-    constexpr explicit variant(in_place_type_t<T>, ::std::initializer_list<U> il, Args&&... args) {
+    constexpr explicit variant(in_place_type_t<T>, ::std::initializer_list<U> il, Args&&... args) : variant{_internal::dummy_t{}} {
         _internal::init_alternative_at<_internal::alternative_to_index<0, T, Ts...>::value>(*this, il, std::forward<Args>(args)...);
     }
     
@@ -768,7 +778,7 @@ public:
             ::std::is_constructible<_internal::index_to_alternative_t<I, Ts...>, Args...>::value,
         bool> = true
     >
-    constexpr explicit variant(in_place_index_t<I>, Args&&... args) {
+    constexpr explicit variant(in_place_index_t<I>, Args&&... args) : variant{_internal::dummy_t{}} {
         _internal::init_alternative_at<I>(*this, std::forward<Args>(args)...);
     }
     
@@ -779,7 +789,7 @@ public:
             ::std::is_constructible<_internal::index_to_alternative_t<I, Ts...>, ::std::initializer_list<U>&, Args...>::value,
         bool> = true
     >
-    constexpr explicit variant(in_place_index_t<I>, ::std::initializer_list<U> il, Args&&... args) {
+    constexpr explicit variant(in_place_index_t<I>, ::std::initializer_list<U> il, Args&&... args) : variant{_internal::dummy_t{}} {
         _internal::init_alternative_at<I>(*this, il, std::forward<Args>(args)...);
     }
     
@@ -919,6 +929,8 @@ public:
     }
     
 private:
+    constexpr variant(_internal::dummy_t) : _internal::variant_base_final<Ts...>{_internal::dummy_t{}} {}
+
     template<::std::size_t I, typename T>
     constexpr void assign_impl(::std::true_type, T&& t) {
         emplace<I>(::std::forward<T>(t));
