@@ -11,6 +11,7 @@
 #include "type_traits.hpp"
 #include "utility.hpp"
 
+// TODO: msvc's is_constructible is generally not up to spec up until c++20. embrace it/use your own?
 namespace std {
 template<typename> struct hash;
 }
@@ -219,7 +220,7 @@ struct alt_visitor_table<
 
 template<::std::size_t N, ::std::size_t I, typename Dispatch_Table_T>
 constexpr auto find_dispatch_entry(::std::integral_constant<::std::size_t, I>, const ::std::array<::std::size_t, N>& indices, const Dispatch_Table_T& dispatch_table) {
-    return find_dispatch_entry(::std::integral_constant<::std::size_t, I + 1>{}, indices, dispatch_table[I]);
+    return find_dispatch_entry(::std::integral_constant<::std::size_t, I + 1>{}, indices, dispatch_table[indices[I]]);
 }
 template<::std::size_t N, typename Dispatch_Table_T>
 constexpr auto find_dispatch_entry(::std::integral_constant<::std::size_t, N>, const ::std::array<::std::size_t, N>& indices, const Dispatch_Table_T& dispatch_table) {

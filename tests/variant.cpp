@@ -69,7 +69,6 @@ void run_1_6() {
         validate(idym::get<0>(v).value == 1337, "variant.ctor.3");
     }
 
-    
     IDYM_VALIDATE_EXCEPTION("variant.ctor.5", variant<def_ctor_throws, int>{});
 }
 void run_7_9() {
@@ -161,6 +160,7 @@ void run_10_13() {
     }
 }
 void run_14_19() {
+    // bundling this and 20_29 with variant.ctor.30 through 38 - can't be arsed
     struct int_ctor {
         int_ctor(int v) noexcept : value{v} {}
         int value;
@@ -203,13 +203,74 @@ void run_14_19() {
         validate(idym::get<1>(v).value == 42, "variant.ctor.17");
         validate(idym::get<1>(v).state_flag == 2, "variant.ctor.17");
     }
-    {
-        IDYM_VALIDATE_EXCEPTION("variant.ctor.18", variant<ptr_ctor, int>{nullptr});
-    }
+    IDYM_VALIDATE_EXCEPTION("variant.ctor.18", variant<ptr_ctor, int>{nullptr});
 }
-void run_20_24()
-{
+void run_20_29() {
+    struct init_list_type {
+        init_list_type(std::initializer_list<int> ints, int v) : ints_size{ints.size()}, value{v} {}
+        
+        std::size_t ints_size;
+        int value;
+    };
+    struct init_list_type_throws {
+        init_list_type_throws(std::initializer_list<int>) { throw test_exception{}; }
+    };
+    struct throws {
+        throws(int, int) { throw test_exception{}; }
+    };
 
+    static_assert(!std::is_constructible<variant<int, int>, idym::in_place_type_t<int>, int>::value, "variant.ctor.20.1");
+    static_assert(std::is_constructible<variant<int, void*>, idym::in_place_type_t<int>, int>::value, "variant.ctor.20.1");
+    
+    static_assert(!std::is_constructible<variant<int, void*>, idym::in_place_type_t<int>, void*>::value, "variant.ctor.20.2");
+    static_assert(std::is_constructible<variant<int, void*>, idym::in_place_type_t<int>, int>::value, "variant.ctor.20.2");
+    
+    static_assert(!std::is_constructible<variant<init_list_type, init_list_type>, idym::in_place_type_t<init_list_type>, std::initializer_list<int>, int>::value, "variant.ctor.25.1");
+    static_assert(std::is_constructible<variant<init_list_type, int>, idym::in_place_type_t<init_list_type>, std::initializer_list<int>, int>::value, "variant.ctor.25.1");
+    
+    static_assert(!std::is_constructible<variant<init_list_type, int>, idym::in_place_type_t<init_list_type>, std::initializer_list<int>, void*>::value, "variant.ctor.25.2");
+    static_assert(std::is_constructible<variant<init_list_type, int>, idym::in_place_type_t<init_list_type>, std::initializer_list<int>, int>::value, "variant.ctor.25.2");
+    
+    {
+        variant<int, void*> v{idym::in_place_type<int>, 4};
+        validate(idym::holds_alternative<int>(v), "variant.ctor.22");
+        validate(idym::get<0>(v) == 4, "variant.ctor.21");
+    }
+    {
+        variant<int, init_list_type> v{idym::in_place_type<init_list_type>, {1, 2, 3}, 4};
+        validate(idym::holds_alternative<init_list_type>(v), "variant.ctor.27");
+        validate(idym::get<1>(v).ints_size == 3, "variant.ctor.26");
+        validate(idym::get<1>(v).value == 4, "variant.ctor.26");
+    }
+    IDYM_VALIDATE_EXCEPTION("variant.ctor.23", variant<throws, int>{idym::in_place_type<throws>, 1, 2});
+    IDYM_VALIDATE_EXCEPTION("variant.ctor.28", variant<init_list_type_throws, int>{idym::in_place_type<init_list_type_throws>, {1, 2}});
+}
+
+}
+
+// [variant.dtor]
+namespace variant_dtor {
+
+void run_1_2() {
+    struct dtor_type {
+        dtor_type(bool* flag) : dtor_flag{flag} {}
+        ~dtor_type() {
+            *dtor_flag = true;
+        }
+        
+        bool* dtor_flag;
+    };
+    
+    static_assert(std::is_trivially_destructible<variant<int, int>>::value, "variant.dtor.2");
+    static_assert(!std::is_trivially_destructible<variant<int, dtor_type>>::value, "variant.dtor.2");
+    
+    {
+        bool dtor_flag = false;
+        {
+            variant<int, dtor_type> v{idym::in_place_type<dtor_type>, &dtor_flag};
+        }
+        validate(dtor_flag, "variant.dtor.1");
+    }
 }
 
 }
@@ -220,6 +281,8 @@ int main(int argc, char** argv) {
     variant_ctor::run_7_9();
     variant_ctor::run_10_13();
     variant_ctor::run_14_19();
-    variant_ctor::run_20_24();
+    variant_ctor::run_20_29();
+    
+    variant_dtor::run_1_2();
     return 0;
 }
