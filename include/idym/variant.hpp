@@ -11,7 +11,6 @@
 #include "type_traits.hpp"
 #include "utility.hpp"
 
-// TODO: msvc's is_constructible is generally not up to spec up until c++20. embrace it/use your own?
 namespace std {
 template<typename> struct hash;
 }
@@ -436,48 +435,24 @@ struct variant_base_move_ctor<false, Ts...> : variant_base_move_ctor<true, Ts...
     }
 };
 
-// === variant_base_copy_ass
-template<bool, typename...>
-struct variant_base_copy_ass;
-
-template<typename... Ts>
-struct variant_base_copy_ass<true, Ts...> : variant_base_move_ctor<
-    conjunction_v<::std::is_trivially_move_constructible<Ts>...> || !conjunction_v<::std::is_move_constructible<Ts>...>,
-    Ts...
-> {};
-
-template<typename... Ts>
-struct variant_base_copy_ass<false, Ts...> : variant_base_copy_ass<true, Ts...> {
-    constexpr variant_base_copy_ass() = default;
-    constexpr variant_base_copy_ass(const variant_base_copy_ass&) = default;
-    constexpr variant_base_copy_ass(variant_base_copy_ass&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
-
-    constexpr variant_base_copy_ass& operator=(const variant_base_copy_ass& other) {
-        return assign_variants(*this, other, copy_construct_alternative{}, copy_assign_alternative{});
-    }
-};
-
 // === variant_base_move_ass
 template<bool, typename...>
 struct variant_base_move_ass;
 
 template<typename... Ts>
-struct variant_base_move_ass<true, Ts...> : variant_base_copy_ass<
-    (
-        conjunction_v<::std::is_trivially_copy_constructible<Ts>...> && 
-        conjunction_v<::std::is_trivially_copy_assignable<Ts>...> && 
-        conjunction_v<::std::is_trivially_destructible<Ts>...>
-    ) || (!conjunction_v<::std::is_copy_constructible<Ts>...> || !conjunction_v<::std::is_copy_assignable<Ts>...>),
+constexpr bool move_ass_nothrow = conjunction_v<::std::is_nothrow_move_constructible<Ts>...> && conjunction_v<::std::is_nothrow_move_assignable<Ts>...>;
+
+template<typename... Ts>
+struct variant_base_move_ass<true, Ts...> : variant_base_move_ctor<
+    conjunction_v<::std::is_trivially_move_constructible<Ts>...> || !conjunction_v<::std::is_move_constructible<Ts>...>,
     Ts...
 >
 {
-    static constexpr auto ass_nothrow = conjunction_v<::std::is_nothrow_move_constructible<Ts>...> && conjunction_v<::std::is_nothrow_move_assignable<Ts>...>;
-
     constexpr variant_base_move_ass() = default;
     constexpr variant_base_move_ass(const variant_base_move_ass&) = default;
     constexpr variant_base_move_ass(variant_base_move_ass&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
     constexpr variant_base_move_ass& operator=(const variant_base_move_ass&) = default;
-    constexpr variant_base_move_ass& operator=(variant_base_move_ass&&) noexcept(ass_nothrow) = default;
+    constexpr variant_base_move_ass& operator=(variant_base_move_ass&&) noexcept(move_ass_nothrow<Ts...>) = default;
 };
 
 template<typename... Ts>
@@ -487,8 +462,45 @@ struct variant_base_move_ass<false, Ts...> : variant_base_move_ass<true, Ts...> 
     constexpr variant_base_move_ass(variant_base_move_ass&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
     constexpr variant_base_move_ass& operator=(const variant_base_move_ass&) = default;
 
-    constexpr variant_base_move_ass& operator=(variant_base_move_ass&& other) noexcept(variant_base_move_ass<true, Ts...>::ass_nothrow) {
+    constexpr variant_base_move_ass& operator=(variant_base_move_ass&& other) noexcept(move_ass_nothrow<Ts...>) {
         return assign_variants(*this, other, move_construct_alternative{}, move_assign_alternative{});
+    }
+};
+
+// === variant_base_copy_ass
+template<bool, typename...>
+struct variant_base_copy_ass;
+
+template<typename... Ts>
+struct variant_base_copy_ass<true, Ts...> : variant_base_move_ass<
+    (
+        conjunction_v<::std::is_trivially_move_constructible<Ts>...> &&
+        conjunction_v<::std::is_trivially_move_assignable<Ts>...> &&
+        conjunction_v<::std::is_trivially_destructible<Ts>...>
+    ) || (!conjunction_v<::std::is_move_constructible<Ts>...> || !conjunction_v<::std::is_move_assignable<Ts>...>),
+    Ts...
+> {};
+
+template<typename... Ts>
+struct variant_base_copy_ass<false, Ts...> : variant_base_copy_ass<true, Ts...> {
+    constexpr variant_base_copy_ass() = default;
+    constexpr variant_base_copy_ass(const variant_base_copy_ass&) = default;
+    constexpr variant_base_copy_ass(variant_base_copy_ass&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
+
+    constexpr variant_base_copy_ass& operator=(variant_base_copy_ass&&) noexcept(move_ass_nothrow<Ts...>) = default;
+    constexpr variant_base_copy_ass& operator=(const variant_base_copy_ass& other) {
+        constexpr bool use_emplace = conjunction_v<::std::is_nothrow_copy_constructible<Ts>...> || !conjunction_v<::std::is_nothrow_move_constructible<Ts>...>;
+    
+        copy_assign_impl(::std::bool_constant<use_emplace>{}, other);
+        return *this;
+    }
+    
+private:
+    void copy_assign_impl(::std::true_type, const variant_base_copy_ass& other) {
+        assign_variants(*this, other, copy_construct_alternative{}, copy_assign_alternative{});
+    }
+    void copy_assign_impl(::std::false_type, const variant_base_copy_ass& other) {
+        *this = variant_base_copy_ass{other};
     }
 };
 
@@ -500,12 +512,12 @@ template<bool, typename...>
 struct variant_base_def_ctor;
 
 template<typename... Ts>
-struct variant_base_def_ctor<true, Ts...> : variant_base_move_ass<
+struct variant_base_def_ctor<true, Ts...> : variant_base_copy_ass<
     (
-        conjunction_v<::std::is_trivially_move_constructible<Ts>...> &&
-        conjunction_v<::std::is_trivially_move_assignable<Ts>...> &&
+        conjunction_v<::std::is_trivially_copy_constructible<Ts>...> && 
+        conjunction_v<::std::is_trivially_copy_assignable<Ts>...> && 
         conjunction_v<::std::is_trivially_destructible<Ts>...>
-    ) || (!conjunction_v<::std::is_move_constructible<Ts>...> || !conjunction_v<::std::is_move_assignable<Ts>...>),
+    ) || (!conjunction_v<::std::is_copy_constructible<Ts>...> || !conjunction_v<::std::is_copy_assignable<Ts>...>),
     Ts...
 >
 {
@@ -517,12 +529,12 @@ struct variant_base_def_ctor<true, Ts...> : variant_base_move_ass<
 };
 
 template<typename... Ts>
-struct variant_base_def_ctor<false, Ts...> : variant_base_move_ass<
+struct variant_base_def_ctor<false, Ts...> : variant_base_copy_ass<
     (
-        conjunction_v<::std::is_trivially_move_constructible<Ts>...> &&
-        conjunction_v<::std::is_trivially_move_assignable<Ts>...> &&
+        conjunction_v<::std::is_trivially_copy_constructible<Ts>...> && 
+        conjunction_v<::std::is_trivially_copy_assignable<Ts>...> && 
         conjunction_v<::std::is_trivially_destructible<Ts>...>
-    ) || (!conjunction_v<::std::is_move_constructible<Ts>...> || !conjunction_v<::std::is_move_assignable<Ts>...>),
+    ) || (!conjunction_v<::std::is_copy_constructible<Ts>...> || !conjunction_v<::std::is_copy_assignable<Ts>...>),
     Ts...
 >
 {

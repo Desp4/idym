@@ -29,13 +29,16 @@ struct valueless_helper {
     valueless_helper() = default;
     valueless_helper(const valueless_helper&) = default;
     valueless_helper(valueless_helper&&) { throw test_exception{}; }
+    valueless_helper& operator=(const valueless_helper&) = default;
     valueless_helper& operator=(valueless_helper&&) { throw test_exception{}; return *this; }
 };
-using valueless_var_t = variant<valueless_helper, int>;
+template<typename... Ts>
+using valueless_var_t = variant<valueless_helper, int, Ts...>;
 
-valueless_var_t make_valueless() {
-    valueless_var_t v1;
-    valueless_var_t v2{idym::in_place_index<1>, 0};
+template<typename... Ts>
+valueless_var_t<Ts...> make_valueless() {
+    valueless_var_t<Ts...> v1;
+    valueless_var_t<Ts...> v2{idym::in_place_index<1>, 0};
     try { v2 = std::move(v1); } catch (test_exception) {}
     return v2;
 }
@@ -103,8 +106,8 @@ void run_7_9() {
         validate(idym::get<0>(v2).value == 1338, "variant.ctor.7");
     }
     {
-        auto v1 = make_valueless();
-        valueless_var_t v2{v1};
+        auto v1 = make_valueless<int>();
+        valueless_var_t<int> v2{v1};
         validate(v2.valueless_by_exception(), "variant.ctor.7");
     }
     {
@@ -150,8 +153,8 @@ void run_10_13() {
         validate(idym::get<0>(v2).value == 1338, "variant.ctor.11");
     }
     {
-        auto v1 = make_valueless();
-        valueless_var_t v2{std::move(v1)};
+        auto v1 = make_valueless<int>();
+        valueless_var_t<int> v2{std::move(v1)};
         validate(v2.valueless_by_exception(), "variant.ctor.11");
     }
     {
@@ -275,6 +278,68 @@ void run_1_2() {
 
 }
 
+// [variant.assign]
+namespace variant_assign {
+
+template<int Id_Dummy, bool Noexcept = true>
+struct assign_type {
+    int state = 0;
+    int* dtor_count;
+    
+    assign_type(int* count) : dtor_count{count} {}
+    assign_type(const assign_type& other) {
+        state = 1;
+        dtor_count = other.dtor_count;
+    }
+    assign_type(assign_type&& other) noexcept(Noexcept) {
+        state = 2;
+        dtor_count = other.dtor_count;
+    }
+    ~assign_type() {
+        ++(*dtor_count);
+    }
+    
+    assign_type& operator=(const assign_type& other) {
+        state = 3;
+        dtor_count = other.dtor_count;
+        return *this;
+    }
+    assign_type& operator=(assign_type&& other) noexcept(Noexcept) {
+        state = 4;
+        dtor_count = other.dtor_count;
+        return *this;
+    }
+};
+
+void run_1_5() {
+    {
+        int dtor_count = 0;
+        auto v1 = make_valueless<assign_type<0>>();
+        auto v2 = make_valueless<assign_type<0>>();
+        valueless_var_t<assign_type<0>> v3{idym::in_place_type<assign_type<0>>, &dtor_count};
+        
+        v2 = v1;
+        v3 = v1;
+        validate(v2.valueless_by_exception(), "variant.assign.2.1");
+        validate(v3.valueless_by_exception(), "variant.assign.2.2");
+        validate(dtor_count == 1, "variant.assign.2.2");
+    }
+    {
+        int dtor_count = 0;
+        variant<assign_type<0>, int> v1{&dtor_count};
+        variant<assign_type<0>, int> v2{&dtor_count};
+        
+        v2 = v1;
+        validate(idym::get<0>(v2).state == 3, "variant.assign.2.3");
+        validate(dtor_count == 0, "variant.assign.2.3");
+    }
+    {
+        
+    }
+}
+
+}
+
 
 int main(int argc, char** argv) {
     variant_ctor::run_1_6();
@@ -284,5 +349,7 @@ int main(int argc, char** argv) {
     variant_ctor::run_20_29();
     
     variant_dtor::run_1_2();
+    
+    variant_assign::run_1_5();
     return 0;
 }
