@@ -329,12 +329,32 @@ void run_1_5() {
         variant<assign_type<0>, int> v1{&dtor_count};
         variant<assign_type<0>, int> v2{&dtor_count};
         
-        v2 = v1;
+        auto& v2_ret = v2 = v1;
+        validate(&v2_ret == &v2, "variant.assign.4");
+        
+        validate(v1.index() == v2.index(), "variant.assign.3");
         validate(idym::get<0>(v2).state == 3, "variant.assign.2.3");
         validate(dtor_count == 0, "variant.assign.2.3");
     }
     {
+        int dtor_count1 = 0;
+        int dtor_count2 = 0;
+        int dtor_count3 = 0;
+        variant<assign_type<0, true>, assign_type<0, false>> v1{idym::in_place_type<assign_type<0, true>>, &dtor_count1};
+        variant<assign_type<0, true>, assign_type<0, false>> v2{idym::in_place_type<assign_type<0, true>>, &dtor_count2};
+        variant<assign_type<0, true>, assign_type<0, false>> v3{idym::in_place_type<assign_type<0, false>>, &dtor_count3};
         
+        v1 = v3;
+        validate(v1.index() == v3.index(), "variant.assign.3");
+        validate(idym::get<1>(v1).state == 1, "variant.assign.2.4");
+        
+        v1 = v2;
+        validate(v1.index() == v2.index(), "variant.assign.3");
+        validate(idym::get<0>(v1).state == 2, "variant.assign.2.5");
+        
+        validate(dtor_count1 == 1, "variant.assign.2.4");
+        validate(dtor_count2 == 1, "variant.assign.2.5");
+        validate(dtor_count3 == 1, "variant.assign.2.5");
     }
 }
 

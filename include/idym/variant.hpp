@@ -489,17 +489,29 @@ struct variant_base_copy_ass<false, Ts...> : variant_base_copy_ass<true, Ts...> 
 
     constexpr variant_base_copy_ass& operator=(variant_base_copy_ass&&) noexcept(move_ass_nothrow<Ts...>) = default;
     constexpr variant_base_copy_ass& operator=(const variant_base_copy_ass& other) {
-        constexpr bool use_emplace = conjunction_v<::std::is_nothrow_copy_constructible<Ts>...> || !conjunction_v<::std::is_nothrow_move_constructible<Ts>...>;
-    
-        copy_assign_impl(::std::bool_constant<use_emplace>{}, other);
+        using dispatch_ptr_t = void (variant_base_copy_ass::*)(const variant_base_copy_ass&);
+        constexpr dispatch_ptr_t copy_dispatch_table[] = {
+            &variant_base_copy_ass::call_copy_assign_impl<Ts>...
+        };
+        
+        if (other._index != variant_npos && other._index != this->_index)
+            (this->*(copy_dispatch_table[other._index]))(other);
+        else
+            copy_assign_impl(::std::true_type{}, other);
         return *this;
     }
     
 private:
-    void copy_assign_impl(::std::true_type, const variant_base_copy_ass& other) {
+    template<typename T>
+    constexpr void call_copy_assign_impl(const variant_base_copy_ass& other) {
+        constexpr auto use_emplace = ::std::is_nothrow_copy_constructible<T>::value || !::std::is_nothrow_move_constructible<T>::value;
+        copy_assign_impl(::std::bool_constant<use_emplace>{}, other);
+    }
+
+    constexpr void copy_assign_impl(::std::true_type, const variant_base_copy_ass& other) {
         assign_variants(*this, other, copy_construct_alternative{}, copy_assign_alternative{});
     }
-    void copy_assign_impl(::std::false_type, const variant_base_copy_ass& other) {
+    constexpr void copy_assign_impl(::std::false_type, const variant_base_copy_ass& other) {
         *this = variant_base_copy_ass{other};
     }
 };
