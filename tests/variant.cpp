@@ -312,6 +312,28 @@ struct assign_type {
 };
 
 void run_1_5() {
+    struct custom_copy {
+        custom_copy(const custom_copy&) {}
+        custom_copy& operator=(const custom_copy&) { return *this; }
+    };
+
+    struct ncopy_ctor {
+        ncopy_ctor(const ncopy_ctor&) = delete;
+        ncopy_ctor& operator=(const ncopy_ctor&) = default;
+    };
+    struct ncopy_ass {
+        ncopy_ass(const ncopy_ass&) = default;
+        ncopy_ass& operator=(const ncopy_ass&) = delete;
+    };
+    
+    static_assert(std::is_copy_assignable<variant<int, double>>::value, "variant.assign.5");
+    static_assert(std::is_copy_assignable<variant<int, custom_copy>>::value, "variant.assign.5");
+    static_assert(!std::is_copy_assignable<variant<int, ncopy_ctor>>::value, "variant.assign.5");
+    static_assert(!std::is_copy_assignable<variant<int, ncopy_ass>>::value, "variant.assign.5");
+    
+    static_assert(std::is_trivially_copy_assignable<variant<int, double>>::value, "variant.assign.5");
+    static_assert(!std::is_trivially_copy_assignable<variant<int, custom_copy>>::value, "variant.assign.5");
+
     {
         int dtor_count = 0;
         auto v1 = make_valueless<assign_type<0>>();
@@ -357,6 +379,43 @@ void run_1_5() {
         validate(dtor_count3 == 1, "variant.assign.2.5");
     }
 }
+void run_6_10() {
+    {
+        int dtor_count = 0;
+        auto v1 = make_valueless<assign_type<0>>();
+        auto v2 = make_valueless<assign_type<0>>();
+        auto v3 = make_valueless<assign_type<0>>();
+        valueless_var_t<assign_type<0>> v4{idym::in_place_type<assign_type<0>>, &dtor_count};
+        
+        v3 = std::move(v1);
+        v4 = std::move(v2);
+        validate(v3.valueless_by_exception(), "variant.assign.8.1");
+        validate(v4.valueless_by_exception(), "variant.assign.8.2");
+        validate(dtor_count == 1, "variant.assign.8.2");
+    }
+    {
+        int dtor_count = 0;
+        variant<assign_type<0>, int> v1{&dtor_count};
+        variant<assign_type<0>, int> v2{&dtor_count};
+        
+        auto& v2_ret = v2 = std::move(v1);
+        validate(&v2_ret == &v2, "variant.assign.9");
+        
+        validate(idym::get<0>(v2).state == 4, "variant.assign.8.3");
+        validate(dtor_count == 0, "variant.assign.8.3");
+    }
+    {
+        int dtor_count1 = 0;
+        int dtor_count2 = 0;
+        variant<assign_type<0>, assign_type<1>> v1{idym::in_place_index<0>, &dtor_count1};
+        variant<assign_type<0>, assign_type<1>> v2{idym::in_place_index<1>, &dtor_count2};
+        
+        v1 = std::move(v2);
+        validate(idym::get<1>(v1).state == 2, "variant.assign.8.4");
+        validate(dtor_count1 == 1, "variant.assign.8.4");
+        validate(dtor_count2 == 0, "variant.assign.8.4");
+    }
+}
 
 }
 
@@ -371,5 +430,6 @@ int main(int argc, char** argv) {
     variant_dtor::run_1_2();
     
     variant_assign::run_1_5();
+    variant_assign::run_6_10();
     return 0;
 }

@@ -359,13 +359,36 @@ constexpr auto& assign_variants(Var_Lhs&& lhs, Var_Rhs&& rhs, Ctor_Fun ctor, Ass
 }
 
 // === variant_base
-template<typename... Ts>
-struct variant_base {
+template<bool, typename... Ts>
+struct variant_base_ncopy_ass {
     static constexpr ::std::size_t size = sizeof...(Ts);
 
     variant_storage<Ts...> _storage;
     ::std::size_t _index = variant_npos;
 };
+template<typename... Ts>
+struct variant_base_ncopy_ass<false, Ts...> : variant_base_ncopy_ass<true, Ts...> {
+    variant_base_ncopy_ass& operator=(const variant_base_ncopy_ass&) = delete;
+};
+
+template<bool, typename... Ts>
+struct variant_base_nmove_ass : variant_base_ncopy_ass<
+    conjunction_v<::std::is_copy_constructible<Ts>...> && conjunction_v<::std::is_copy_assignable<Ts>...>,
+    Ts...
+> {};
+template<typename... Ts>
+struct variant_base_nmove_ass<false, Ts...> : variant_base_nmove_ass<true, Ts...> {
+    variant_base_nmove_ass& operator=(variant_base_nmove_ass&&) = delete;
+};
+
+template<typename... Ts>
+struct variant_base : variant_base_nmove_ass<
+    conjunction_v<::std::is_move_constructible<Ts>...> && conjunction_v<::std::is_move_assignable<Ts>...>,
+    Ts...
+> {};
+
+template<typename... Ts>
+constexpr bool move_ass_nothrow = conjunction_v<::std::is_nothrow_move_constructible<Ts>...> && conjunction_v<::std::is_nothrow_move_assignable<Ts>...>;
 
 /*
  * For each base, the first bool is:
@@ -406,6 +429,9 @@ struct variant_base_copy_ctor<false, Ts...> : variant_base_copy_ctor<true, Ts...
         visit_impl(copy_construct_alternative{}, other._index, this->_storage, other._storage);
         this->_index = other._index;
     }
+    
+    constexpr variant_base_copy_ctor& operator=(const variant_base_copy_ctor&) = default;
+    constexpr variant_base_copy_ctor& operator=(variant_base_copy_ctor&&) noexcept(move_ass_nothrow<Ts...>) = default;
 };
 
 // === variant_base_move_ctor
@@ -421,6 +447,9 @@ struct variant_base_move_ctor<true, Ts...> : variant_base_copy_ctor<
     constexpr variant_base_move_ctor() = default;
     constexpr variant_base_move_ctor(const variant_base_move_ctor&) = default;
     constexpr variant_base_move_ctor(variant_base_move_ctor&&) noexcept(conjunction_v<::std::is_nothrow_move_constructible<Ts>...>) = default;
+    
+    constexpr variant_base_move_ctor& operator=(const variant_base_move_ctor&) = default;
+    constexpr variant_base_move_ctor& operator=(variant_base_move_ctor&&) noexcept(move_ass_nothrow<Ts...>) = default;
 };
 
 template<typename... Ts>
@@ -433,14 +462,14 @@ struct variant_base_move_ctor<false, Ts...> : variant_base_move_ctor<true, Ts...
         visit_impl(move_construct_alternative{}, other._index, this->_storage, other._storage);
         this->_index = other._index;
     }
+    
+    constexpr variant_base_move_ctor& operator=(const variant_base_move_ctor&) = default;
+    constexpr variant_base_move_ctor& operator=(variant_base_move_ctor&&) noexcept(move_ass_nothrow<Ts...>) = default;
 };
 
 // === variant_base_move_ass
 template<bool, typename...>
 struct variant_base_move_ass;
-
-template<typename... Ts>
-constexpr bool move_ass_nothrow = conjunction_v<::std::is_nothrow_move_constructible<Ts>...> && conjunction_v<::std::is_nothrow_move_assignable<Ts>...>;
 
 template<typename... Ts>
 struct variant_base_move_ass<true, Ts...> : variant_base_move_ctor<
