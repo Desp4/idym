@@ -380,6 +380,38 @@ void run_1_5() {
     }
 }
 void run_6_10() {
+    struct custom_move {
+        custom_move(custom_move&&) noexcept {}
+        custom_move& operator=(custom_move&&) noexcept { return *this; }
+    };
+
+    struct nmove_ctor {
+        nmove_ctor(const nmove_ctor&) = delete;
+        nmove_ctor& operator=(const nmove_ctor&) = default;
+    };
+    struct nmove_ass {
+        nmove_ass(nmove_ass&&) = default;
+        nmove_ass& operator=(nmove_ass&&) = delete;
+    };
+    
+    struct move_throws {
+        move_throws() = default;
+        move_throws(move_throws&&) { throw test_exception{}; }
+        move_throws& operator=(move_throws&&) { throw test_exception{}; return *this; }
+    };
+    
+    static_assert(std::is_move_assignable<variant<int, custom_move>>::value, "variant.assign.7");
+    static_assert(std::is_move_assignable<variant<int, double>>::value, "variant.assign.7");
+    static_assert(!std::is_move_assignable<variant<int, nmove_ctor>>::value, "variant.assign.7");
+    static_assert(!std::is_move_assignable<variant<int, nmove_ass>>::value, "variant.assign.7");
+    
+    static_assert(std::is_trivially_move_assignable<variant<int, double>>::value, "variant.assign.10");
+    static_assert(!std::is_trivially_move_assignable<variant<int, custom_move>>::value, "variant.assign.10");
+    
+    static_assert(std::is_nothrow_move_assignable<variant<int, double>>::value, "variant.assign.10");
+    static_assert(std::is_nothrow_move_assignable<variant<int, custom_move>>::value, "variant.assign.10");
+    static_assert(!std::is_nothrow_move_assignable<variant<int, move_throws>>::value, "variant.assign.10");
+
     {
         int dtor_count = 0;
         auto v1 = make_valueless<assign_type<0>>();
@@ -415,6 +447,23 @@ void run_6_10() {
         validate(dtor_count1 == 1, "variant.assign.8.4");
         validate(dtor_count2 == 0, "variant.assign.8.4");
     }
+    {
+        variant<int, move_throws> v1{idym::in_place_index<0>};
+        variant<int, move_throws> v2{idym::in_place_index<1>};
+        
+        IDYM_VALIDATE_EXCEPTION("variant.assign.10.1", v1 = std::move(v2));
+        validate(v1.valueless_by_exception(), "variant.assign.10.1");
+    }
+    {
+        variant<int, move_throws> v1{idym::in_place_index<1>};
+        variant<int, move_throws> v2{idym::in_place_index<1>};
+        
+        IDYM_VALIDATE_EXCEPTION("variant.assign.10.2", v1 = std::move(v2));
+        validate(v1.index() == 1, "variant.assign.10.2");
+    }
+}
+void run_11_16() {
+
 }
 
 }
@@ -431,5 +480,6 @@ int main(int argc, char** argv) {
     
     variant_assign::run_1_5();
     variant_assign::run_6_10();
+    variant_assign::run_11_16();
     return 0;
 }
