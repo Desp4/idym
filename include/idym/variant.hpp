@@ -950,6 +950,8 @@ public:
 
         if (rhs._index == variant_npos) {
             _internal::visit_impl(_internal::move_construct_alternative{}, this->_index, rhs._storage, this->_storage);
+            _internal::visit_impl(_internal::destroy_alternative{}, this->_index, this->_storage);
+            this->_index = variant_npos;
             return;
         }
 
@@ -963,7 +965,7 @@ public:
         
         variant tmp_rhs{std::move(rhs)};
         _internal::visit_impl(_internal::move_construct_alternative{}, old_lhs_ind, rhs._storage, this->_storage);
-        rhs._storage = old_lhs_ind;
+        rhs._index = old_lhs_ind;
         
         _internal::visit_impl(_internal::move_construct_alternative{}, old_rhs_ind, this->_storage, tmp_rhs._storage);
         this->_index = old_rhs_ind;

@@ -463,11 +463,184 @@ void run_6_10() {
     }
 }
 void run_11_16() {
-
+    struct int_ctor {
+        int_ctor(int v) noexcept : value{v} {}
+        int value;
+    };
+    struct char_ctor {
+        char_ctor(char v) : value{v} {}
+        char value;
+    };
+    struct ptr_ctor {
+        ptr_ctor(void*) {}
+        ptr_ctor& operator=(const ptr_ctor&) { throw test_exception{}; return *this; }
+    };
+    
+    static_assert(std::is_assignable<variant<int_ctor, int, char_ctor>, char>::value, "variant.assign.12.3");
+    static_assert(!std::is_assignable<variant<int_ctor, int_ctor>, int>::value, "variant.assign.12.3");
+    static_assert(!std::is_assignable<variant<int_ctor, char>, void*>::value, "variant.assign.12.2");
+    
+    static_assert(std::is_nothrow_assignable<variant<int_ctor, ptr_ctor>, int>::value, "variant.assign.16.1");
+    static_assert(!std::is_nothrow_assignable<variant<int_ctor, ptr_ctor>, void*>::value, "variant.assign.16.1");
+    
+    {
+        int dtor_count = 0;
+        variant<assign_type<0>, int> v1{&dtor_count};
+        v1 = assign_type<0>{&dtor_count};
+        
+        validate(dtor_count == 1, "variant.assign.13.1");
+        validate(v1.index() == 0, "variant.assign.14");
+        validate(idym::get<0>(v1).state == 4, "variant.assign.13.1");
+    }
+    {
+        int dtor_count = 0;
+        variant<assign_type<0>, int> v1{idym::in_place_index<1>};
+        v1 = assign_type<0>{&dtor_count};
+        
+        validate(dtor_count == 1, "variant.assign.13.2");
+        validate(v1.index() == 0, "variant.assign.14");
+        validate(idym::get<0>(v1).state == 2, "variant.assign.13.2");
+    }
+    {
+        variant<ptr_ctor, int> v1{nullptr};
+        IDYM_VALIDATE_EXCEPTION("variant.assign.16.1", v1 = ptr_ctor{nullptr});
+        
+        validate(v1.index() == 0, "variant.assign.16.1");
+    }
 }
 
 }
 
+// [variant.mod]
+namespace variant_mod {
+
+void run_1_18() {
+    struct init_list_type {
+        init_list_type(std::initializer_list<int> ints, int v) : ints_size{ints.size()}, value{v} {}
+        
+        std::size_t ints_size;
+        int value;
+    };
+    struct int_type {
+        int_type(int v) : value{v} {}
+        int value;
+    };
+    
+    {
+        variant<int, init_list_type, int_type> v1{0};
+        auto& value_ref = v1.emplace<1>({1, 2, 3}, 4);
+        
+        validate(v1.index() == 1, "variant.mod.15");
+        validate(&value_ref == &idym::get<1>(v1), "variant.mod.16");
+        validate(idym::get<1>(v1).ints_size == 3, "variant.mod.14");
+        validate(idym::get<1>(v1).value == 4, "variant.mod.14");
+    }
+    {
+        variant<int, init_list_type, int_type> v1{0};
+        auto& value_ref = v1.emplace<init_list_type>({1, 2, 3}, 4);
+        
+        validate(v1.index() == 1, "variant.mod.4");
+        validate(&value_ref == &idym::get<1>(v1), "variant.mod.4");
+        validate(idym::get<1>(v1).ints_size == 3, "variant.mod.4");
+        validate(idym::get<1>(v1).value == 4, "variant.mod.4");
+    }
+    {
+        variant<int, init_list_type, int_type> v1{0};
+        auto& value_ref = v1.emplace<2>(4);
+        
+        validate(v1.index() == 2, "variant.mod.8");
+        validate(&value_ref == &idym::get<2>(v1), "variant.mod.9");
+        validate(idym::get<2>(v1).value == 4, "variant.mod.7");
+    }
+    {
+        variant<int, init_list_type, int_type> v1{0};
+        auto& value_ref = v1.emplace<int_type>(4);
+        
+        validate(v1.index() == 2, "variant.mod.2");
+        validate(&value_ref == &idym::get<2>(v1), "variant.mod.2");
+        validate(idym::get<2>(v1).value == 4, "variant.mod.2");
+    }
+}
+
+}
+
+// [variant.status]
+namespace variant_status {
+
+void run_1_3() {
+    {
+        const auto valueless = make_valueless();
+        validate(valueless.valueless_by_exception(), "variant.status.2");
+        validate(valueless.index() == idym::variant_npos, "variant.status.3");
+    }
+    {
+        variant<int, void*> v1{4};
+        validate(!v1.valueless_by_exception(), "variant.status.1");
+        validate(v1.index() == 0, "variant.status.3");
+    }
+}
+
+}
+
+// [variant.swap]
+namespace variant_swap {
+
+struct default_swappable {
+    default_swappable(int v) : value{v} {}
+    int value;
+};
+
+struct swappable {
+    int swapped_status = 0;
+};
+
+void swap(swappable& lhs, swappable& rhs) noexcept(false) {
+    lhs.swapped_status = 1;
+    rhs.swapped_status = 2;
+}
+
+void run_1_5() {
+    {
+        auto v1 = make_valueless();
+        auto v2 = make_valueless();
+        v1.swap(v2);
+        
+        validate(v1.valueless_by_exception(), "variant.swap.3.1");
+        validate(v2.valueless_by_exception(), "variant.swap.3.1");
+    }
+    {
+        variant<swappable, int> v1;
+        variant<swappable, int> v2;
+        
+        v1.swap(v2);
+        validate(idym::get<0>(v1).swapped_status == 1, "variant.swap.3.2");
+        validate(idym::get<0>(v2).swapped_status == 2, "variant.swap.3.2");
+        
+        static_assert(!noexcept(v1.swap(v2)), "variant.swap.5");
+    }
+    {
+        variant<default_swappable, int> v1{idym::in_place_index<0>, 5};
+        variant<default_swappable, int> v2{idym::in_place_index<0>, 4};
+        
+        v1.swap(v2);
+        validate(idym::get<0>(v1).value == 4, "variant.swap.3.2");
+        validate(idym::get<0>(v2).value == 5, "variant.swap.3.2");
+        
+        static_assert(noexcept(v1.swap(v2)), "variant.swap.5");
+    }
+    {
+        variant<default_swappable, int> v1{idym::in_place_index<0>, 5};
+        variant<default_swappable, int> v2{idym::in_place_index<1>, 4};
+        
+        v1.swap(v2);
+        validate(v1.index() == 1, "variant.swap.3.3");
+        validate(v2.index() == 0, "variant.swap.3.3");
+        validate(idym::get<1>(v1) == 4, "variant.swap.3.3");
+        validate(idym::get<0>(v2).value == 5, "variant.swap.3.3");
+    }
+}
+
+}
 
 int main(int argc, char** argv) {
     variant_ctor::run_1_6();
@@ -481,5 +654,11 @@ int main(int argc, char** argv) {
     variant_assign::run_1_5();
     variant_assign::run_6_10();
     variant_assign::run_11_16();
+    
+    variant_mod::run_1_18();
+    
+    variant_status::run_1_3();
+    
+    variant_swap::run_1_5();
     return 0;
 }
