@@ -6,13 +6,15 @@
 using idym::variant;
 
 // common
-#define IDYM_VALIDATE_EXCEPTION(STR, ...) \
+#define IDYM_VALIDATE_EXCEPTION_GENERIC(STR, EXCEPTION_TYPE, ...) \
     do { \
         bool caught = false; \
         try { __VA_ARGS__; } \
-        catch (test_exception) { caught = true; } \
+        catch (EXCEPTION_TYPE) { caught = true; } \
         validate(caught, STR); \
     } while(false)
+#define IDYM_VALIDATE_EXCEPTION(STR, ...) IDYM_VALIDATE_EXCEPTION_GENERIC(STR, test_exception, __VA_ARGS__)
+#define IDYM_VALIDATE_BAD_ACCESS(STR, ...) IDYM_VALIDATE_EXCEPTION_GENERIC(STR, idym::bad_variant_access, __VA_ARGS__)
 
 struct test_exception {};
 
@@ -31,6 +33,13 @@ struct valueless_helper {
     valueless_helper(valueless_helper&&) { throw test_exception{}; }
     valueless_helper& operator=(const valueless_helper&) = default;
     valueless_helper& operator=(valueless_helper&&) { throw test_exception{}; return *this; }
+    
+    friend bool operator==(valueless_helper, valueless_helper) { return true; }
+    friend bool operator!=(valueless_helper, valueless_helper) { return true; }
+    friend bool operator<(valueless_helper, valueless_helper) { return true; }
+    friend bool operator>(valueless_helper, valueless_helper) { return true; }
+    friend bool operator<=(valueless_helper, valueless_helper) { return true; }
+    friend bool operator>=(valueless_helper, valueless_helper) { return true; }
 };
 template<typename... Ts>
 using valueless_var_t = variant<valueless_helper, int, Ts...>;
@@ -642,6 +651,313 @@ void run_1_5() {
 
 }
 
+// [variant.helper]
+namespace variant_helper {
+
+static_assert(idym::variant_size_v<variant<int, char, char>> == 3, "variant.helper.1");
+static_assert(idym::variant_size_v<const variant<int, char, char>> == 3, "variant.helper.2");
+
+static_assert(std::is_same<char, idym::variant_alternative_t<1, variant<int, char, char>>>::value, "variant.helper.3");
+static_assert(std::is_same<int, idym::variant_alternative_t<0, const variant<int, char, char>>>::value, "variant.helper.3");
+
+}
+
+// [variant.get]
+namespace variant_get {
+
+void run_1_2() {
+    {
+        variant<int, char> v1{};
+        validate(idym::holds_alternative<int>(v1), "variant.get.2");
+        validate(!idym::holds_alternative<char>(v1), "variant.get.2");
+    }
+}
+void run_3_9() {
+    {
+        variant<int, char> v1{};
+        const auto& cv1 = v1;
+        
+        idym::get<0>(v1);
+        IDYM_VALIDATE_BAD_ACCESS("variant.get.7", idym::get<1>(v1));
+        
+        static_assert(std::is_same<decltype(idym::get<0>(v1)), int&>::value, "variant.get.7");
+        static_assert(std::is_same<decltype(idym::get<0>(std::move(v1))), int&&>::value, "variant.get.7");
+        static_assert(std::is_same<decltype(idym::get<0>(cv1)), const int&>::value, "variant.get.7");
+        static_assert(std::is_same<decltype(idym::get<0>(std::move(cv1))), const int&&>::value, "variant.get.7");
+    }
+    {
+        variant<int, char> v1{};
+        const auto& cv1 = v1;
+        
+        idym::get<int>(v1);
+        IDYM_VALIDATE_BAD_ACCESS("variant.get.9", idym::get<char>(v1));
+        
+        static_assert(std::is_same<decltype(idym::get<int>(v1)), int&>::value, "variant.get.9");
+        static_assert(std::is_same<decltype(idym::get<int>(std::move(v1))), int&&>::value, "variant.get.9");
+        static_assert(std::is_same<decltype(idym::get<int>(cv1)), const int&>::value, "variant.get.9");
+        static_assert(std::is_same<decltype(idym::get<int>(std::move(cv1))), const int&&>::value, "variant.get.9");
+    }
+}
+void run_10_13() {
+    {
+        variant<int, char> v1{};
+        const auto& cv1 = v1;
+        
+        validate(idym::get_if<0>(&v1), "variant.get.11");
+        validate(!idym::get_if<1>(&v1), "variant.get.11");
+        
+        static_assert(std::is_same<decltype(idym::get_if<0>(&v1)), int*>::value, "variant.get.11");
+        static_assert(std::is_same<decltype(idym::get_if<0>(&cv1)), const int*>::value, "variant.get.11");
+    }
+    {
+        variant<int, char> v1{};
+        const auto& cv1 = v1;
+        
+        validate(idym::get_if<int>(&v1), "variant.get.13");
+        validate(!idym::get_if<char>(&v1), "variant.get.13");
+        
+        static_assert(std::is_same<decltype(idym::get_if<int>(&v1)), int*>::value, "variant.get.13");
+        static_assert(std::is_same<decltype(idym::get_if<int>(&cv1)), const int*>::value, "variant.get.13");
+    }
+}
+
+}
+
+// [variant.relops]
+namespace variant_relops {
+
+struct comparable {
+    comparable(int v) : value{v} {}
+    int value = 0;
+};
+bool operator==(const comparable& lhs, const comparable& rhs) {
+    return lhs.value == rhs.value;
+}
+bool operator!=(const comparable& lhs, const comparable& rhs) {
+    return lhs.value != rhs.value;
+}
+bool operator<(const comparable& lhs, const comparable& rhs) {
+    return lhs.value < rhs.value;
+}
+bool operator>(const comparable& lhs, const comparable& rhs) {
+    return lhs.value > rhs.value;
+}
+bool operator<=(const comparable& lhs, const comparable& rhs) {
+    return lhs.value <= rhs.value;
+}
+bool operator>=(const comparable& lhs, const comparable& rhs) {
+    return lhs.value >= rhs.value;
+}
+
+void run_1_2() {
+    {
+        const auto lhs = make_valueless<comparable>();
+        const auto rhs = make_valueless<comparable>();
+        validate(lhs == rhs, "variant.relops.2");
+    }
+    {
+        const variant<comparable, int> lhs{idym::in_place_index<0>, 1};
+        const variant<comparable, int> rhs{idym::in_place_index<1>, 1};
+        validate(!(lhs == rhs), "variant.relops.2");
+    }
+    {
+        variant<comparable, int> lhs{idym::in_place_index<0>, 1};
+        variant<comparable, int> rhs{idym::in_place_index<0>, 1};
+        validate(lhs == rhs, "variant.relops.2");
+        
+        idym::get<0>(rhs).value = 2;
+        validate(!(lhs == rhs), "variant.relops.2");
+    }
+}
+void run_3_4() {
+    {
+        const auto lhs = make_valueless<comparable>();
+        const auto rhs = make_valueless<comparable>();
+        validate(!(lhs != rhs), "variant.relops.4");
+    }
+    {
+        const variant<comparable, int> lhs{idym::in_place_index<0>, 1};
+        const variant<comparable, int> rhs{idym::in_place_index<1>, 1};
+        validate(lhs != rhs, "variant.relops.4");
+    }
+    {
+        variant<comparable, int> lhs{idym::in_place_index<0>, 1};
+        variant<comparable, int> rhs{idym::in_place_index<0>, 1};
+        validate(!(lhs != rhs), "variant.relops.4");
+        
+        idym::get<0>(rhs).value = 2;
+        validate(lhs != rhs, "variant.relops.4");
+    }
+}
+void run_5_6() {
+    {
+        const auto lhs = make_valueless<comparable>();
+        const valueless_var_t<comparable> rhs{idym::in_place_index<2>, 1};
+        validate(lhs < rhs, "variant.relops.6");
+    }
+    {
+        const valueless_var_t<comparable> lhs{idym::in_place_index<2>, 1};
+        const auto rhs = make_valueless<comparable>();
+        validate(!(lhs < rhs), "variant.relops.6");
+    }
+    {
+        const variant<comparable, int> lhs{idym::in_place_index<0>, 1};
+        const variant<comparable, int> rhs{idym::in_place_index<1>, 1};
+        validate(lhs < rhs, "variant.relops.6");
+    }
+    {
+        const variant<comparable, int> lhs{idym::in_place_index<1>, 1};
+        const variant<comparable, int> rhs{idym::in_place_index<0>, 1};
+        validate(!(lhs < rhs), "variant.relops.6");
+    }
+    {
+        variant<comparable, int> lhs{idym::in_place_index<0>, 1};
+        variant<comparable, int> rhs{idym::in_place_index<0>, 0};
+        validate(!(lhs < rhs), "variant.relops.6");
+        
+        idym::get<0>(rhs).value = 2;
+        validate(lhs < rhs, "variant.relops.6");
+    }
+}
+void run_7_8() {
+    {
+        const auto lhs = make_valueless<comparable>();
+        const valueless_var_t<comparable> rhs{idym::in_place_index<2>, 1};
+        validate(!(lhs > rhs), "variant.relops.8");
+    }
+    {
+        const valueless_var_t<comparable> lhs{idym::in_place_index<2>, 1};
+        const auto rhs = make_valueless<comparable>();
+        validate(lhs > rhs, "variant.relops.8");
+    }
+    {
+        const variant<comparable, int> lhs{idym::in_place_index<0>, 1};
+        const variant<comparable, int> rhs{idym::in_place_index<1>, 1};
+        validate(!(lhs > rhs), "variant.relops.8");
+    }
+    {
+        const variant<comparable, int> lhs{idym::in_place_index<1>, 1};
+        const variant<comparable, int> rhs{idym::in_place_index<0>, 1};
+        validate(lhs > rhs, "variant.relops.8");
+    }
+    {
+        variant<comparable, int> lhs{idym::in_place_index<0>, 1};
+        variant<comparable, int> rhs{idym::in_place_index<0>, 0};
+        validate(lhs > rhs, "variant.relops.8");
+        
+        idym::get<0>(rhs).value = 2;
+        validate(!(lhs > rhs), "variant.relops.8");
+    }
+}
+void run_9_10() {
+    {
+        const auto lhs = make_valueless<comparable>();
+        const valueless_var_t<comparable> rhs{idym::in_place_index<2>, 1};
+        validate(lhs <= rhs, "variant.relops.10");
+    }
+    {
+        const valueless_var_t<comparable> lhs{idym::in_place_index<2>, 1};
+        const auto rhs = make_valueless<comparable>();
+        validate(!(lhs <= rhs), "variant.relops.10");
+    }
+    {
+        const variant<comparable, int> lhs{idym::in_place_index<0>, 1};
+        const variant<comparable, int> rhs{idym::in_place_index<1>, 1};
+        validate(lhs <= rhs, "variant.relops.10");
+    }
+    {
+        const variant<comparable, int> lhs{idym::in_place_index<1>, 1};
+        const variant<comparable, int> rhs{idym::in_place_index<0>, 1};
+        validate(!(lhs <= rhs), "variant.relops.10");
+    }
+    {
+        variant<comparable, int> lhs{idym::in_place_index<0>, 1};
+        variant<comparable, int> rhs{idym::in_place_index<0>, 0};
+        validate(!(lhs <= rhs), "variant.relops.10");
+        
+        idym::get<0>(rhs).value = 2;
+        validate(lhs <= rhs, "variant.relops.10");
+        
+        idym::get<0>(rhs).value = 1;
+        validate(lhs <= rhs, "variant.relops.10");
+    }
+}
+void run_11_12() {
+    {
+        const auto lhs = make_valueless<comparable>();
+        const valueless_var_t<comparable> rhs{idym::in_place_index<2>, 1};
+        validate(!(lhs >= rhs), "variant.relops.12");
+    }
+    {
+        const valueless_var_t<comparable> lhs{idym::in_place_index<2>, 1};
+        const auto rhs = make_valueless<comparable>();
+        validate(lhs >= rhs, "variant.relops.12");
+    }
+    {
+        const variant<comparable, int> lhs{idym::in_place_index<0>, 1};
+        const variant<comparable, int> rhs{idym::in_place_index<1>, 1};
+        validate(!(lhs >= rhs), "variant.relops.12");
+    }
+    {
+        const variant<comparable, int> lhs{idym::in_place_index<1>, 1};
+        const variant<comparable, int> rhs{idym::in_place_index<0>, 1};
+        validate(lhs >= rhs, "variant.relops.12");
+    }
+    {
+        variant<comparable, int> lhs{idym::in_place_index<0>, 1};
+        variant<comparable, int> rhs{idym::in_place_index<0>, 0};
+        validate(lhs >= rhs, "variant.relops.12");
+        
+        idym::get<0>(rhs).value = 2;
+        validate(!(lhs >= rhs), "variant.relops.12");
+        
+        idym::get<0>(rhs).value = 1;
+        validate(lhs >= rhs, "variant.relops.12");
+    }
+}
+
+}
+
+// [variant.visit]
+namespace variant_visit {
+
+template<std::size_t>
+struct visit_type {};
+
+struct visitor {
+    template<typename... Ts>
+    void* operator()(Ts&&...) const {
+        return nullptr;
+    }
+    void* operator()(visit_type<1>& v, visit_type<3>&, const visit_type<5>&) const {
+        return &v;
+    }
+};
+
+void run_1_8() {
+    {
+        variant<visit_type<0>, visit_type<1>> v1{idym::in_place_type<visit_type<1>>};
+        variant<visit_type<1>, visit_type<2>, visit_type<3>> v2{idym::in_place_type<visit_type<3>>};
+        const variant<visit_type<2>, visit_type<3>, visit_type<4>, visit_type<5>> v3{idym::in_place_type<visit_type<5>>};
+        
+        void* ret = idym::visit(visitor{}, v1, v2, v3);
+        validate(ret == &idym::get<1>(v1), "variant.visit.6");
+        
+        v2.emplace<0>();
+        ret = idym::visit(visitor{}, v1, v2, v3);
+        validate(!ret, "variant.visit.6");
+    }
+    {
+        const auto v1 = make_valueless();
+        variant<visit_type<6>, visit_type<7>> v2;
+        variant<visit_type<8>, visit_type<9>, visit_type<10>> v3;
+        
+        IDYM_VALIDATE_BAD_ACCESS("variant.visit.7", idym::visit(visitor{}, v1, v2, v3));
+    }
+}
+
+}
+
 int main(int argc, char** argv) {
     variant_ctor::run_1_6();
     variant_ctor::run_7_9();
@@ -660,5 +976,18 @@ int main(int argc, char** argv) {
     variant_status::run_1_3();
     
     variant_swap::run_1_5();
+    
+    variant_get::run_1_2();
+    variant_get::run_3_9();
+    variant_get::run_10_13();
+    
+    variant_relops::run_1_2();
+    variant_relops::run_3_4();
+    variant_relops::run_5_6();
+    variant_relops::run_7_8();
+    variant_relops::run_9_10();
+    variant_relops::run_11_12();
+    
+    variant_visit::run_1_8();
     return 0;
 }

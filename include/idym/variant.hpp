@@ -141,7 +141,7 @@ struct dispatch_variant_storage;
 template<typename Ret_T, ::std::size_t... Is, typename Visitor_T, typename... Storage_Ts>
 struct dispatch_variant_storage<Ret_T, ::std::index_sequence<Is...>, Visitor_T, Storage_Ts...> {
     static constexpr Ret_T do_dispatch(Visitor_T visitor, Storage_Ts... vs) {
-        ::std::forward<decltype(visitor)>(visitor)(get_variant_storage<Is>::do_get_ref(::std::forward<decltype(vs)>(vs))...);
+        return ::std::forward<decltype(visitor)>(visitor)(get_variant_storage<Is>::do_get_ref(::std::forward<decltype(vs)>(vs))...);
     }
 };
 
@@ -674,9 +674,6 @@ struct type_occurrence_count<Target_T> {
     static constexpr ::std::size_t value = 0;
 };
 
-template<typename, typename>
-struct type_occurrence_count_helper;
-
 template<typename T, typename... Ts>
 struct type_occurrence_count<T, variant_base<Ts...>> : type_occurrence_count<T, Ts...> {};
 
@@ -697,7 +694,7 @@ constexpr auto get_if_impl(Variant_T&& v) {
 }
 template<typename T, typename Variant_T>
 constexpr auto get_if_impl(Variant_T&& v) {
-    static_assert(type_occurrence_count_helper<T, remove_cvref_t<Variant_T>>::value == 1, "T has occur in Ts exactly once");
+    static_assert(type_occurrence_count<T, remove_cvref_t<Variant_T>>::value == 1, "T has occur in Ts exactly once");
     return get_if_impl<alternative_to_index_helper<0, T, remove_cvref_t<Variant_T>>::value>(::std::forward<Variant_T>(v));
 }
 
@@ -944,14 +941,13 @@ public:
                 return;
             
             _internal::visit_impl(_internal::move_construct_alternative{}, rhs._index, this->_storage, rhs._storage);
+            _internal::visit_impl(_internal::destroy_alternative{}, rhs._index, rhs._storage);
             ::std::swap(this->_index, rhs._index);
             return;
         }
 
         if (rhs._index == variant_npos) {
-            _internal::visit_impl(_internal::move_construct_alternative{}, this->_index, rhs._storage, this->_storage);
-            _internal::visit_impl(_internal::destroy_alternative{}, this->_index, this->_storage);
-            this->_index = variant_npos;
+            rhs.swap(*this);
             return;
         }
 
@@ -1075,27 +1071,43 @@ constexpr bool operator!=(const variant<Ts...>& v, const variant<Ts...>& w) {
 }
 template<typename... Ts, ::std::enable_if_t<conjunction_v<_internal::less_test<Ts>...>, bool> = true>
 constexpr bool operator<(const variant<Ts...>& v, const variant<Ts...>& w) {
-    if (v.index() != w.index())
+    if (w.valueless_by_exception())
         return false;
-    return v.index() == variant_npos || _internal::visit_impl<bool>(_internal::less_alternative{}, v.index(), v._internal_base()._storage, w._internal_base()._storage);
+    if (v.valueless_by_exception())
+        return true;
+    if (v.index() != w.index())
+        return v.index() < w.index();
+    return _internal::visit_impl<bool>(_internal::less_alternative{}, v.index(), v._internal_base()._storage, w._internal_base()._storage);
 }
 template<typename... Ts, ::std::enable_if_t<conjunction_v<_internal::greater_test<Ts>...>, bool> = true>
 constexpr bool operator>(const variant<Ts...>& v, const variant<Ts...>& w) {
-    if (v.index() != w.index())
+    if (v.valueless_by_exception())
         return false;
-    return v.index() == variant_npos || _internal::visit_impl<bool>(_internal::greater_alternative{}, v.index(), v._internal_base()._storage, w._internal_base()._storage);
+    if (w.valueless_by_exception())
+        return true;
+    if (v.index() != w.index())
+        return v.index() > w.index();
+    return _internal::visit_impl<bool>(_internal::greater_alternative{}, v.index(), v._internal_base()._storage, w._internal_base()._storage);
 }
 template<typename... Ts, ::std::enable_if_t<conjunction_v<_internal::leq_test<Ts>...>, bool> = true>
 constexpr bool operator<=(const variant<Ts...>& v, const variant<Ts...>& w) {
-    if (v.index() != w.index())
+    if (v.valueless_by_exception())
+        return true;
+    if (w.valueless_by_exception())
         return false;
-    return v.index() == variant_npos || _internal::visit_impl<bool>(_internal::leq_alternative{}, v.index(), v._internal_base()._storage, w._internal_base()._storage);
+    if (v.index() != w.index())
+        return v.index() < w.index();
+    return _internal::visit_impl<bool>(_internal::leq_alternative{}, v.index(), v._internal_base()._storage, w._internal_base()._storage);
 }
 template<typename... Ts, ::std::enable_if_t<conjunction_v<_internal::geq_test<Ts>...>, bool> = true>
 constexpr bool operator>=(const variant<Ts...>& v, const variant<Ts...>& w) {
-    if (v.index() != w.index())
+    if (v.valueless_by_exception())
         return false;
-    return v.index() == variant_npos || _internal::visit_impl<bool>(_internal::geq_alternative{}, v.index(), v._internal_base()._storage, w._internal_base()._storage);
+    if (w.valueless_by_exception())
+        return true;
+    if (v.index() != w.index())
+        return v.index() > w.index();
+    return _internal::visit_impl<bool>(_internal::geq_alternative{}, v.index(), v._internal_base()._storage, w._internal_base()._storage);
 }
 
 // TODO: c++20 spaceship
@@ -1120,6 +1132,7 @@ struct verify_invoke_rets<
     Variant_Ts...
 > : conjunction<
     verify_invoke_rets<
+        Visitor_T,
         Expected_T,
         alt_visitor_accumulator<Arg_Ts..., decltype(get<Is>(::std::declval<Var_T>()))>,
         Variant_Ts...
@@ -1149,8 +1162,15 @@ constexpr Ret_T visit(Visitor&& vis, Variants&&... vars) {
 }
 template<typename Visitor, typename... Variants>
 constexpr decltype(auto) visit(Visitor&& vis, Variants&&... vars) {
-    using ret_t = decltype(::std::invoke(::std::declval<Visitor>(), get<0>(::std::declval<Variants>()...)));
-    static_assert(_internal::verify_invoke_rets<Visitor, ret_t, _internal::alt_visitor_accumulator<>, Variants...>::value, "All invoke results have to match");
+    using ret_t = decltype(::std::invoke(::std::declval<Visitor>(), get<0>(::std::declval<Variants>())...));
+    constexpr bool matching_rets = _internal::verify_invoke_rets<
+        Visitor,
+        ret_t,
+        _internal::alt_visitor_accumulator<>,
+        _internal::alt_visitor_arg<::std::make_index_sequence<variant_size_v<remove_cvref_t<Variants>>>, Variants>...
+    >::value;
+    
+    static_assert(matching_rets, "All invoke results have to match");
     return visit<ret_t>(::std::forward<Visitor>(vis), ::std::forward<Variants>(vars)...);
 }
 
