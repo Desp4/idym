@@ -6,14 +6,14 @@ on the language version in use(see below).
 
 ### Building
 All the relevant headers are located in `include/idym`, compilation not necessary. The headers are relocatable as they are,
-they only assume that the are all located in the same directory, for include purposes.
+they only assume that they are all located in the same directory, for include purposes.
 
 The CMake project provides an interface library `idym` with `include` added to the include directories. The project defaults to *C++14*, if
 the language version is not set explicitly.  
 Additionally, test targets can be disabled by switching `IDYM_BUILD_TESTS` to *OFF*.
 
 ### Usage
-All definitions are located in `idym` namespace, it can be changed with a `IDYM_NAMESPACE=<namespace-name>` macro.
+All definitions are located in `idym` namespace, it can be changed with a `IDYM_NAMESPACE=<namespace-name>` definition.
 ```cpp
 #define IDYM_NAMESPACE foo_ns
 #include <idym/variant.hpp>
@@ -23,7 +23,7 @@ void foo() {
     foo_ns::get<int>(variant);
 }
 ```
-Specializations of `std::swap` and `std::hash` can be disabled with by defining `IDYM_NOSTD_INTEROP`.
+Specializations of `std::swap` and `std::hash` can be disabled by defining `IDYM_NOSTD_INTEROP`.
 
 ### Installation
 The installation of a total of three(3) headers is left as an exercise to the reader.
