@@ -3,7 +3,11 @@
 
 #include <type_traits>
 
-namespace idym {
+#ifndef IDYM_NAMESPACE
+  #define IDYM_NAMESPACE idym
+#endif
+
+namespace IDYM_NAMESPACE {
 
 // === conjunction
 template<typename...>
@@ -35,20 +39,20 @@ struct swappable_with : ::std::false_type {};
 template<typename T, typename U>
 struct swappable_with<
     T, U,
-    typename ::idym::_internal::make_void<decltype(swap(::std::declval<T>(), ::std::declval<U>()))>::type
+    typename ::IDYM_NAMESPACE::_internal::make_void<decltype(swap(::std::declval<T>(), ::std::declval<U>()))>::type
 > : ::std::true_type {};
 
 // nothrow_swappable
 template<typename T, typename U>
-struct nothrow_swappable : ::std::bool_constant<
+struct nothrow_swappable : ::std::integral_constant<bool,
     noexcept(swap(::std::declval<T>(), ::std::declval<U>())) && noexcept(swap(::std::declval<U>(), ::std::declval<T>()))
 > {};
 } // <<< std sandbox
 
 template<typename T, typename U>
-struct swappable_with_2 : ::std::bool_constant<conjunction_v<_std_sandbox::swappable_with<T, U>, _std_sandbox::swappable_with<U, T>>> {};
+struct swappable_with_2 : ::std::integral_constant<bool, conjunction_v<_std_sandbox::swappable_with<T, U>, _std_sandbox::swappable_with<U, T>>> {};
 template<typename T, typename U>
-struct nothrow_swappable_2 : ::std::bool_constant<conjunction_v<swappable_with_2<T, U>, _std_sandbox::nothrow_swappable<T, U>>> {};
+struct nothrow_swappable_2 : ::std::integral_constant<bool, conjunction_v<swappable_with_2<T, U>, _std_sandbox::nothrow_swappable<T, U>>> {};
 
 } // <<< internal
 

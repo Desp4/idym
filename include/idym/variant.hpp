@@ -8,26 +8,50 @@
 #include <functional>
 #include <initializer_list>
 
+#ifndef IDYM_NAMESPACE
+  #define IDYM_NAMESPACE idym
+#endif
+
+#if __cpp_impl_three_way_comparison >= 201907L
+  #include <compare>
+#endif
+
 #include "type_traits.hpp"
 #include "utility.hpp"
+
+#if __cpp_constexpr >= 202002L
+  #define IDYM_INTERNAL_CXX20_CONSTEXPR_DTOR constexpr
+#else
+  #define IDYM_INTERNAL_CXX20_CONSTEXPR_DTOR
+#endif
+
+#if __cplusplus >= 202002L
+  #define IDYM_INTERNAL_CXX20_DEPRECATED_VARIANT [[deprecated]]
+#else
+  #define IDYM_INTERNAL_CXX20_DEPRECATED_VARIANT
+#endif
 
 namespace std {
 template<typename> struct hash;
 }
 
-namespace idym {
+namespace IDYM_NAMESPACE {
 
 template<typename...>
 class variant;
 
 // === variant_npos
-constexpr ::std::size_t variant_npos = -1; // TODO: c++17 inline
+IDYM_INTERNAL_CXX17_INLINE constexpr ::std::size_t variant_npos = -1;
 
 // === monostate
 struct monostate{};
 
 inline constexpr bool operator==(monostate, monostate) noexcept { return true; }
-// TODO: c++20 spaceship
+#if __cpp_impl_three_way_comparison >= 201907L
+inline constexpr ::std::strong_ordering operator<=>(monostate, monostate) noexcept {
+    return ::std::strong_ordering::equal;
+}
+#endif
 
 // === bad_variant_access
 class bad_variant_access : public ::std::exception {
@@ -39,6 +63,67 @@ public:
 };
 
 namespace _internal { // >>> internal
+
+// === INVOKE compat
+#if __cpp_lib_invoke >= 201411L
+  #define IDYM_INTERNAL_INVOKE ::std::invoke
+#else
+  #define IDYM_INTERNAL_INVOKE _internal::invoke
+
+template<class>
+constexpr bool is_reference_wrapper_v = false;
+template<class U>
+constexpr bool is_reference_wrapper_v<::std::reference_wrapper<U>> = true;
+
+// function case
+template<typename Member, typename Object, typename... Args>
+constexpr decltype(auto) invoke_member(::std::true_type, ::std::integral_constant<::std::size_t, 0>, Member member, Object&& object, Args&&... args) {
+    return (::std::forward<Object>(object).*member)(::std::forward<Args>(args)...);
+}
+template<typename Member, typename Object, typename... Args>
+constexpr decltype(auto) invoke_member(::std::true_type, ::std::integral_constant<::std::size_t, 1>, Member member, Object&& object, Args&&... args) {
+    return (object.get().*member)(::std::forward<Args>(args)...);
+}
+template<typename Member, typename Object, typename... Args>
+constexpr decltype(auto) invoke_member(::std::true_type, ::std::integral_constant<::std::size_t, 2>, Member member, Object&& object, Args&&... args) {
+    return ((*::std::forward<Object>(object)).*member)(::std::forward<Args>(args)...);
+}
+// variable case
+template<typename Member, typename Object>
+constexpr decltype(auto) invoke_member(::std::false_type, ::std::integral_constant<::std::size_t, 0>, Member member, Object&& object) {
+    return ::std::forward<Object>(object).*member;
+}
+template<typename Member, typename Object>
+constexpr decltype(auto) invoke_member(::std::false_type, ::std::integral_constant<::std::size_t, 1>, Member member, Object&& object) {
+    return object.get().*member;
+}
+template<typename Member, typename Object>
+constexpr decltype(auto) invoke_member(::std::false_type, ::std::integral_constant<::std::size_t, 2>, Member member, Object&& object) {
+    return (*::std::forward<Object>(object)).*member;
+}
+
+template<typename C, typename Pointed, typename Object, typename... Args>
+constexpr decltype(auto) invoke2(::std::true_type, Pointed C::* member, Object&& object, Args&&... args) {
+    using object_t = remove_cvref_t<Object>;
+    constexpr bool is_wrapped = is_reference_wrapper_v<object_t>;
+    constexpr bool is_derived_object = ::std::is_same<C, object_t>::value || ::std::is_base_of<C, object_t>::value;
+    constexpr ::std::size_t dispatch_ind = is_derived_object ? 0 : (is_wrapped ? 1 : 2);
+    
+    return invoke_member(
+        ::std::is_function<Pointed>{}, ::std::integral_constant<::std::size_t, dispatch_ind>{},
+        member, ::std::forward<Object>(object), ::std::forward<Args>(args)...
+    );
+}
+template<typename F, typename... Args>
+constexpr decltype(auto) invoke2(::std::false_type, F&& f, Args&&... args) {
+    return ::std::forward<F>(f)(::std::forward<Args>(args)...);
+}
+
+template<typename F, typename... Args>
+constexpr decltype(auto) invoke(F&& f, Args&&... args) {
+    return invoke2(::std::is_member_pointer<remove_cvref_t<F>>{}, ::std::forward<F>(f), ::std::forward<Args>(args)...);
+}
+#endif
 
 // == dummy_t
 struct dummy_t {};
@@ -78,7 +163,7 @@ union variant_storage_impl<false, T, Ts...> {
     variant_storage<Ts...> v1;
     
     constexpr variant_storage_impl() noexcept : v1{} {}
-    ~variant_storage_impl() {} // TODO: c++20, constexpr
+    IDYM_INTERNAL_CXX20_CONSTEXPR_DTOR ~variant_storage_impl() {}
 };
 
 // === internal get
@@ -141,7 +226,7 @@ struct dispatch_variant_storage;
 template<typename Ret_T, ::std::size_t... Is, typename Visitor_T, typename... Storage_Ts>
 struct dispatch_variant_storage<Ret_T, ::std::index_sequence<Is...>, Visitor_T, Storage_Ts...> {
     static constexpr Ret_T do_dispatch(Visitor_T visitor, Storage_Ts... vs) {
-        return ::std::forward<decltype(visitor)>(visitor)(get_variant_storage<Is>::do_get_ref(::std::forward<decltype(vs)>(vs))...);
+        return IDYM_INTERNAL_INVOKE(::std::forward<Visitor_T>(visitor), get_variant_storage<Is>::do_get_ref(::std::forward<decltype(vs)>(vs))...);
     }
 };
 
@@ -326,6 +411,15 @@ struct geq_alternative {
         return pair.lhs >= pair.rhs;
     }
 };
+#if __cpp_impl_three_way_comparison >= 201907L
+struct spaceship_alternative {
+    template<typename Pair_T>
+    constexpr auto operator()(const Pair_T& pair) const {
+        return pair.lhs <=> pair.rhs;
+    }
+};
+#endif
+
 struct hash_alternative {
     template<typename Container_T>
     constexpr ::std::size_t operator()(const Container_T& v) const {
@@ -404,7 +498,7 @@ struct variant_base_dtor<true, Ts...> : variant_base<Ts...> {};
 
 template<typename... Ts>
 struct variant_base_dtor<false, Ts...> : variant_base_dtor<true, Ts...> {
-    ~variant_base_dtor() { // TODO: c++20 constexpr
+    IDYM_INTERNAL_CXX20_CONSTEXPR_DTOR ~variant_base_dtor() {
         if (this->_index != variant_npos)
             visit_impl(destroy_alternative{}, this->_index, this->_storage);
     }
@@ -534,7 +628,7 @@ private:
     template<typename T>
     constexpr void call_copy_assign_impl(const variant_base_copy_ass& other) {
         constexpr auto use_emplace = ::std::is_nothrow_copy_constructible<T>::value || !::std::is_nothrow_move_constructible<T>::value;
-        copy_assign_impl(::std::bool_constant<use_emplace>{}, other);
+        copy_assign_impl(::std::integral_constant<bool, use_emplace>{}, other);
     }
 
     constexpr void copy_assign_impl(::std::true_type, const variant_base_copy_ass& other) {
@@ -689,7 +783,7 @@ constexpr auto* init_alternative_at(variant_base<Alt_Ts...>& storage, Ts&&... ar
 // === get_impl
 template<::std::size_t I, typename Variant_T>
 constexpr auto get_if_impl(Variant_T&& v) {
-    static_assert(I < v.size, "I is required to be less than the alternative count");
+    static_assert(I < remove_cvref_t<Variant_T>::size, "I is required to be less than the alternative count");
     return v._index == I ? get_variant_storage<I>::do_get(v._storage) : nullptr;
 }
 template<typename T, typename Variant_T>
@@ -753,9 +847,9 @@ struct variant_alternative<I, variant<Ts...>> : _internal::index_to_alternative<
 template<::std::size_t I, typename T>
 struct variant_alternative<I, const T> : variant_alternative<I, T> {};
 template<::std::size_t I, typename T>
-struct variant_alternative<I, volatile T> : variant_alternative<I, T> {}; // TODO: c++20 deprecated
+struct IDYM_INTERNAL_CXX20_DEPRECATED_VARIANT variant_alternative<I, volatile T> : variant_alternative<I, T> {};
 template<::std::size_t I, typename T>
-struct variant_alternative<I, const volatile T> : variant_alternative<I, T> {}; // TODO: c++20 deprecated
+struct IDYM_INTERNAL_CXX20_DEPRECATED_VARIANT variant_alternative<I, const volatile T> : variant_alternative<I, T> {};
 
 template<::std::size_t I, typename T>
 using variant_alternative_t = typename variant_alternative<I, T>::type;
@@ -769,9 +863,9 @@ struct variant_size<variant<Ts...>> : ::std::integral_constant<::std::size_t, si
 template<typename T>
 struct variant_size<const T> : variant_size<T> {};
 template<typename T>
-struct variant_size<volatile T> : variant_size<T> {}; // TODO: c++20 deprecated
+struct IDYM_INTERNAL_CXX20_DEPRECATED_VARIANT variant_size<volatile T> : variant_size<T> {};
 template<typename T>
-struct variant_size<const volatile T> : variant_size<T> {}; // TODO: c++20 deprecated
+struct IDYM_INTERNAL_CXX20_DEPRECATED_VARIANT variant_size<const volatile T> : variant_size<T> {};
 
 template<typename T>
 constexpr ::std::size_t variant_size_v = variant_size<T>::value;
@@ -866,7 +960,7 @@ public:
         if (this->_index == alt_ind)
             *_internal::get_variant_storage<alt_ind>::do_get(this->_storage) = std::forward<T>(t);
         else
-            assign_impl<alt_ind>(::std::bool_constant<direct_emplace>{}, ::std::forward<T>(t));
+            assign_impl<alt_ind>(::std::integral_constant<bool, direct_emplace>{}, ::std::forward<T>(t));
         return *this;
     }
     
@@ -1110,7 +1204,22 @@ constexpr bool operator>=(const variant<Ts...>& v, const variant<Ts...>& w) {
     return _internal::visit_impl<bool>(_internal::geq_alternative{}, v.index(), v._internal_base()._storage, w._internal_base()._storage);
 }
 
-// TODO: c++20 spaceship
+#if __cpp_impl_three_way_comparison >= 201907L
+template<typename... Ts> requires(::std::three_way_comparable<Ts> && ...)
+constexpr ::std::common_comparison_category_t<::std::compare_three_way_result_t<Ts>...> operator<=>(const variant<Ts...>& v, const variant<Ts...>& w) {
+    if (v.valueless_by_exception() && w.valueless_by_exception())
+        return ::std::strong_ordering::equal;
+    if (v.valueless_by_exception())
+        return ::std::strong_ordering::less;
+    if (w.valueless_by_exception())
+        return ::std::strong_ordering::greater;
+    if (auto c = v.index() <=> w.index(); c != 0)
+        return c;
+    
+    using ret_t = ::std::common_comparison_category_t<::std::compare_three_way_result_t<Ts>...>;
+    return _internal::visit_impl<ret_t>(_internal::spaceship_alternative{}, v.index(), v._internal_base()._storage, w._internal_base()._storage);
+}
+#endif
 
 namespace _internal { // >>> internal
 
@@ -1142,7 +1251,7 @@ struct verify_invoke_rets<
 template<typename Visitor_T, typename Expected_T, typename... Arg_Ts>
 struct verify_invoke_rets<Visitor_T, Expected_T, alt_visitor_accumulator<Arg_Ts...>> : ::std::is_same<
     Expected_T,
-    decltype(::std::invoke(::std::declval<Visitor_T>(), ::std::declval<Arg_Ts>()...))
+    decltype(IDYM_INTERNAL_INVOKE(::std::declval<Visitor_T>(), ::std::declval<Arg_Ts>()...))
 > {};
 
 } // <<< internal
@@ -1162,7 +1271,7 @@ constexpr Ret_T visit(Visitor&& vis, Variants&&... vars) {
 }
 template<typename Visitor, typename... Variants>
 constexpr decltype(auto) visit(Visitor&& vis, Variants&&... vars) {
-    using ret_t = decltype(::std::invoke(::std::declval<Visitor>(), get<0>(::std::declval<Variants>())...));
+    using ret_t = decltype(IDYM_INTERNAL_INVOKE(::std::declval<Visitor>(), get<0>(::std::declval<Variants>())...));
     constexpr bool matching_rets = _internal::verify_invoke_rets<
         Visitor,
         ret_t,
@@ -1202,29 +1311,31 @@ struct variant_hash_base<
 
 }
 
+#ifndef IDYM_NOSTD_INTEROP
 namespace std { // >>> std
 
 // === swap
 template<typename... Ts,
     ::std::enable_if_t<
-        ::idym::conjunction_v<::std::is_move_constructible<Ts>...> &&
-        ::idym::conjunction_v<::idym::is_swappable<Ts...>>,
+        ::IDYM_NAMESPACE::conjunction_v<::std::is_move_constructible<Ts>...> &&
+        ::IDYM_NAMESPACE::conjunction_v<::IDYM_NAMESPACE::is_swappable<Ts...>>,
     bool> = true
 >
-constexpr void swap(::idym::variant<Ts...>& lhs, ::idym::variant<Ts...>& rhs) noexcept(noexcept(lhs.swap(rhs))) {
+constexpr void swap(::IDYM_NAMESPACE::variant<Ts...>& lhs, ::IDYM_NAMESPACE::variant<Ts...>& rhs) noexcept(noexcept(lhs.swap(rhs))) {
     lhs.swap(rhs);
 }
 
 template<typename... Ts>
-struct hash<::idym::variant<Ts...>> : ::idym::_internal::variant_hash_base<::idym::variant<Ts...>> {};
+struct hash<::IDYM_NAMESPACE::variant<Ts...>> : ::IDYM_NAMESPACE::_internal::variant_hash_base<::IDYM_NAMESPACE::variant<Ts...>> {};
 
 template<>
-struct hash<::idym::monostate> {
-    inline constexpr ::std::size_t operator()(::idym::monostate) const {
+struct hash<::IDYM_NAMESPACE::monostate> {
+    inline constexpr ::std::size_t operator()(::IDYM_NAMESPACE::monostate) const {
         return 0;
     }
 };
 
 } // <<< std
+#endif
 
 #endif

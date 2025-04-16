@@ -3,12 +3,22 @@
 
 #include <cstddef>
 
-namespace idym {
+#ifndef IDYM_NAMESPACE
+  #define IDYM_NAMESPACE idym
+#endif
+
+#if __cpp_inline_variables >= 201606L
+  #define IDYM_INTERNAL_CXX17_INLINE inline
+#else
+  #define IDYM_INTERNAL_CXX17_INLINE
+#endif
+
+namespace IDYM_NAMESPACE {
 
 // === in_place_t
 struct in_place_t { explicit in_place_t() = default; };
 // === in_place
-constexpr in_place_t in_place{}; // TODO: c++17 inline
+IDYM_INTERNAL_CXX17_INLINE constexpr in_place_t in_place{};
 
 // === in_place_type_t
 template<typename T>
