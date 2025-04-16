@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.14)
 
 project(idym)
-
 option(IDYM_BUILD_TESTS "Build tests" ON)
 
 if (NOT CMAKE_CXX_STANDARD)
@@ -13,12 +12,7 @@ add_library(idym INTERFACE)
 target_include_directories(idym INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 if (IDYM_BUILD_TESTS)
-    add_executable(idym_test_variant
-        tests/variant.cpp
-        include/idym/variant.hpp
-        include/idym/type_traits.hpp
-        include/idym/utility.hpp
-    )
+    add_executable(idym_test_variant tests/variant.cpp)
     target_link_libraries(idym_test_variant PRIVATE idym)
     
     enable_testing()
