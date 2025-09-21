@@ -2,16 +2,9 @@
 #define IDYM_UTILITY_H
 
 #include <cstddef>
+#include <type_traits>
 
-#ifndef IDYM_NAMESPACE
-  #define IDYM_NAMESPACE idym
-#endif
-
-#if __cpp_inline_variables >= 201606L
-  #define IDYM_INTERNAL_CXX17_INLINE inline
-#else
-  #define IDYM_INTERNAL_CXX17_INLINE
-#endif
+#include "idym_defs.hpp"
 
 namespace IDYM_NAMESPACE {
 
@@ -33,6 +26,14 @@ struct in_place_index_t { explicit in_place_index_t() = default; };
 // === in_place_index
 template<::std::size_t I>
 constexpr in_place_index_t<I> in_place_index{};
+
+// === as_const
+template<typename T>
+constexpr ::std::add_const_t<T>& as_const(T& t) noexcept {
+    return t;
+}
+template<typename T>
+void as_const(const T&&) = delete;
 
 }
 

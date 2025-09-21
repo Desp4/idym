@@ -3,9 +3,7 @@
 
 #include <type_traits>
 
-#ifndef IDYM_NAMESPACE
-  #define IDYM_NAMESPACE idym
-#endif
+#include "idym_defs.hpp"
 
 namespace IDYM_NAMESPACE {
 

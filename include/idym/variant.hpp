@@ -8,22 +8,12 @@
 #include <functional>
 #include <initializer_list>
 
-#ifndef IDYM_NAMESPACE
-  #define IDYM_NAMESPACE idym
-#endif
-
 #if __cpp_impl_three_way_comparison >= 201907L
   #include <compare>
 #endif
 
 #include "type_traits.hpp"
 #include "utility.hpp"
-
-#if __cpp_constexpr >= 202002L
-  #define IDYM_INTERNAL_CXX20_CONSTEXPR_DTOR constexpr
-#else
-  #define IDYM_INTERNAL_CXX20_CONSTEXPR_DTOR
-#endif
 
 #if __cplusplus >= 202002L
   #define IDYM_INTERNAL_CXX20_DEPRECATED_VARIANT [[deprecated]]
@@ -124,9 +114,6 @@ constexpr decltype(auto) invoke(F&& f, Args&&... args) {
     return invoke2(::std::is_member_pointer<remove_cvref_t<F>>{}, ::std::forward<F>(f), ::std::forward<Args>(args)...);
 }
 #endif
-
-// == dummy_t
-struct dummy_t {};
 
 // === first_of
 template<typename T, typename... Ts>
