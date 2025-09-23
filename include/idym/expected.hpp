@@ -777,6 +777,32 @@ public:
         return remove_cvref_t<decltype(invoke(::std::forward<F>(f), ::std::move(this->_val)))>(unexpect, ::std::move(error()));
     }
 
+    template<typename F, ::std::enable_if_t<::std::is_constructible<T, T&>::value, bool> = true>
+    constexpr auto or_else(F&& f) & {
+        if (this->_has_value)
+            return remove_cvref_t<decltype(invoke(::std::forward<F>(f), this->_unex))>(in_place, this->_val);
+        return invoke(::std::forward<F>(f), this->_unex);
+    }
+    template<typename F, ::std::enable_if_t<::std::is_constructible<T, const T&>::value, bool> = true>
+    constexpr auto or_else(F&& f) const & {
+        if (this->_has_value)
+            return remove_cvref_t<decltype(invoke(::std::forward<F>(f), this->_unex))>(in_place, this->_val);
+        return invoke(::std::forward<F>(f), this->_unex);
+    }
+
+    template<typename F, ::std::enable_if_t<::std::is_constructible<T, T&&>::value, bool> = true>
+    constexpr auto or_else(F&& f) && {
+        if (this->_has_value)
+            return remove_cvref_t<decltype(invoke(::std::forward<F>(f), ::std::move(this->_unex)))>(in_place, ::std::move(this->_val));
+        return invoke(::std::forward<F>(f), ::std::move(this->_unex));
+    }
+    template<typename F, ::std::enable_if_t<::std::is_constructible<T, const T&&>::value, bool> = true>
+    constexpr auto or_else(F&& f) && {
+        if (this->_has_value)
+            return remove_cvref_t<decltype(invoke(::std::forward<F>(f), ::std::move(this->_unex)))>(in_place, ::std::move(this->_val));
+        return invoke(::std::forward<F>(f), ::std::move(this->_unex));
+    }
+
 private:
     friend _internal::swappable_base<T, E, expected>;
 
