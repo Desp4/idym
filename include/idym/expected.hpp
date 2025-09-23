@@ -425,7 +425,7 @@ public:
         typename U, typename G,
         ::std::enable_if_t<compat_expected_explicit_v<U, G> && compat_expected_constraint_v<U, G>, bool> = true
     >
-    constexpr explicit expected(const expected<U, G>& other) {
+    constexpr explicit expected(const expected<U, G>& other) : expected{_internal::dummy_t{}} {
         forward_construct_compat_expected(other);
     }
 
@@ -433,7 +433,7 @@ public:
         typename U, typename G,
         ::std::enable_if_t<!compat_expected_explicit_v<U, G> && compat_expected_constraint_v<U, G>, bool> = true
     >
-    constexpr expected(const expected<U, G>& other) {
+    constexpr expected(const expected<U, G>& other) : expected{_internal::dummy_t{}} {
         forward_construct_compat_expected(other);
     }
     
@@ -441,7 +441,7 @@ public:
         typename U, typename G,
         ::std::enable_if_t<compat_expected_explicit_v<U, G> && compat_expected_constraint_v<U, G>, bool> = true
     >
-    constexpr explicit expected(expected<U, G>&& other) {
+    constexpr explicit expected(expected<U, G>&& other) : expected{_internal::dummy_t{}} {
         forward_construct_compat_expected(::std::move(other));
     }
 
@@ -449,7 +449,7 @@ public:
         typename U, typename G,
         ::std::enable_if_t<!compat_expected_explicit_v<U, G> && compat_expected_constraint_v<U, G>, bool> = true
     >
-    constexpr expected(expected<U, G>&& other) {
+    constexpr expected(expected<U, G>&& other) : expected{_internal::dummy_t{}} {
         forward_construct_compat_expected(::std::move(other));
     }
     
@@ -457,18 +457,20 @@ public:
         typename U = ::std::remove_cv_t<T>,
         ::std::enable_if_t<compat_t_explicit_v<U> && compat_t_constraint_v<U>, bool> = true
     >
-    constexpr explicit expected(U&& v) {
+    constexpr explicit expected(U&& v) : expected{_internal::dummy_t{}} {
         forward_construct_t(std::forward<U>(v));
     }
     template<
         typename U = ::std::remove_cv_t<T>,
         ::std::enable_if_t<!compat_t_explicit_v<U> && compat_t_constraint_v<U>, bool> = true
     >
-    constexpr expected(U&& v) {
+    constexpr expected(U&& v) : expected{_internal::dummy_t{}} {
         forward_construct_t(std::forward<U>(v));
     }
 
 private:
+    constexpr expected(_internal::dummy_t) : _internal::expected_def_ctor_base<T, E>{_internal::dummy_t{}} {}
+
     template<typename Expected_T>
     void forward_construct_compat_expected(Expected_T&& other) {
         if (other.has_value())
