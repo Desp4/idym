@@ -12,7 +12,7 @@
   #include <compare>
 #endif
 
-#include "functional.hpp"
+#include "type_traits.hpp"
 #include "utility.hpp"
 
 #if __cplusplus >= 202002L

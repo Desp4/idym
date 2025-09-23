@@ -66,7 +66,7 @@ public:
         return x.error() == y.error();
     }
 #if __cpp_impl_three_way_comparison < 201907L
-    // suppliment for synthesized !=
+    // suppliment for synthesized ops
     template<typename E2>
     friend constexpr bool operator!=(const unexpected& x, const unexpected<E2>& y) {
         return !(x == y);
@@ -463,6 +463,12 @@ constexpr bool converts_from_any_cvref_v = disjunction_v<
     ::std::is_constructible<T, const W>, ::std::is_convertible<const W, T>
 >;
 
+template<typename, typename, typename = void>
+struct expected_eq_test : ::std::false_type {};
+
+template<typename T1, typename T2>
+struct expected_eq_test<T1, T2, void_t<decltype(static_cast<bool>(::std::declval<T1>() == ::std::declval<T2>()))>> : ::std::true_type {};
+
 } // <<< internal
 
 // === expected
@@ -755,53 +761,148 @@ public:
     constexpr auto and_then(F&& f) & {
         if (this->_has_value)
             return invoke(::std::forward<F>(f), this->_val);
-        return remove_cvref_t<decltype(invoke(::std::forward<F>(f), this->_val))>(unexpect, error());
+        return remove_cvref_t<invoke_result_t<F, decltype((this->_val))>>(unexpect, error());
     }
     template<typename F, ::std::enable_if_t<::std::is_constructible<E, const E&>::value, bool> = true>
     constexpr auto and_then(F&& f) const & {
         if (this->_has_value)
             return invoke(::std::forward<F>(f), this->_val);
-        return remove_cvref_t<decltype(invoke(::std::forward<F>(f), this->_val))>(unexpect, error());
+        return remove_cvref_t<invoke_result_t<F, decltype((this->_val))>>(unexpect, error());
     }
 
     template<typename F, ::std::enable_if_t<::std::is_constructible<E, E&&>::value, bool> = true>
     constexpr auto and_then(F&& f) && {
         if (this->_has_value)
             return invoke(::std::forward<F>(f), ::std::move(this->_val));
-        return remove_cvref_t<decltype(invoke(::std::forward<F>(f), ::std::move(this->_val)))>(unexpect, ::std::move(error()));
+        return remove_cvref_t<invoke_result_t<F, decltype(::std::move(this->_val))>>(unexpect, ::std::move(error()));
     }
     template<typename F, ::std::enable_if_t<::std::is_constructible<E, const E&&>::value, bool> = true>
     constexpr auto and_then(F&& f) const && {
         if (this->_has_value)
             return invoke(::std::forward<F>(f), ::std::move(this->_val));
-        return remove_cvref_t<decltype(invoke(::std::forward<F>(f), ::std::move(this->_val)))>(unexpect, ::std::move(error()));
+        return remove_cvref_t<invoke_result_t<F, decltype(::std::move(this->_val))>>(unexpect, ::std::move(error()));
     }
 
     template<typename F, ::std::enable_if_t<::std::is_constructible<T, T&>::value, bool> = true>
     constexpr auto or_else(F&& f) & {
         if (this->_has_value)
-            return remove_cvref_t<decltype(invoke(::std::forward<F>(f), this->_unex))>(in_place, this->_val);
+            return remove_cvref_t<invoke_result_t<F, decltype(error())>>(in_place, this->_val);
         return invoke(::std::forward<F>(f), this->_unex);
     }
     template<typename F, ::std::enable_if_t<::std::is_constructible<T, const T&>::value, bool> = true>
     constexpr auto or_else(F&& f) const & {
         if (this->_has_value)
-            return remove_cvref_t<decltype(invoke(::std::forward<F>(f), this->_unex))>(in_place, this->_val);
+            return remove_cvref_t<invoke_result_t<F, decltype(error())>>(in_place, this->_val);
         return invoke(::std::forward<F>(f), this->_unex);
     }
 
     template<typename F, ::std::enable_if_t<::std::is_constructible<T, T&&>::value, bool> = true>
     constexpr auto or_else(F&& f) && {
         if (this->_has_value)
-            return remove_cvref_t<decltype(invoke(::std::forward<F>(f), ::std::move(this->_unex)))>(in_place, ::std::move(this->_val));
+            return remove_cvref_t<invoke_result_t<F, decltype(::std::move(error()))>>(in_place, ::std::move(this->_val));
         return invoke(::std::forward<F>(f), ::std::move(this->_unex));
     }
     template<typename F, ::std::enable_if_t<::std::is_constructible<T, const T&&>::value, bool> = true>
     constexpr auto or_else(F&& f) && {
         if (this->_has_value)
-            return remove_cvref_t<decltype(invoke(::std::forward<F>(f), ::std::move(this->_unex)))>(in_place, ::std::move(this->_val));
+            return remove_cvref_t<invoke_result_t<F, decltype(::std::move(error()))>>(in_place, ::std::move(this->_val));
         return invoke(::std::forward<F>(f), ::std::move(this->_unex));
     }
+    
+    template<typename F, ::std::enable_if_t<::std::is_constructible<E, E&>::value, bool> = true>
+    constexpr auto transform(F&& f) & {
+        return transform_impl(*this, ::std::forward<F>(f));
+    }
+    template<typename F, ::std::enable_if_t<::std::is_constructible<E, const E&>::value, bool> = true>
+    constexpr auto transform(F&& f) const & {
+        return transform_impl(*this, ::std::forward<F>(f));
+    }
+
+    template<typename F, ::std::enable_if_t<::std::is_constructible<E, E&&>::value, bool> = true>
+    constexpr auto transform(F&& f) && {
+        return transform_impl(::std::move(*this), ::std::forward<F>(f));
+    }
+    template<typename F, ::std::enable_if_t<::std::is_constructible<E, const E&&>::value, bool> = true>
+    constexpr auto transform(F&& f) const && {
+        return transform_impl(::std::move(*this), ::std::forward<F>(f));
+    }
+
+    template<typename F, ::std::enable_if_t<::std::is_constructible<T, T&>::value, bool> = true>
+    constexpr auto transform_error(F&& f) & {
+        return transform_error_impl(*this, ::std::forward<F>(f));
+    }
+    template<typename F, ::std::enable_if_t<::std::is_constructible<T, const T&>::value, bool> = true>
+    constexpr auto transform_error(F&& f) const & {
+        return transform_error_impl(*this, ::std::forward<F>(f));
+    }
+
+    template<typename F, ::std::enable_if_t<::std::is_constructible<T, T&&>::value, bool> = true>
+    constexpr auto transform_error(F&& f) && {
+        return transform_error_impl(::std::move(*this), ::std::forward<F>(f));
+    }
+    template<typename F, ::std::enable_if_t<::std::is_constructible<T, const T&&>::value, bool> = true>
+    constexpr auto transform_error(F&& f) const && {
+        return transform_error_impl(::std::move(*this), ::std::forward<F>(f));
+    }
+    
+    // === comparators
+    template<
+        typename T2, typename E2,
+        ::std::enable_if_t<conjunction_v<_internal::expected_eq_test<const T&, const T2>, _internal::expected_eq_test<const E&, const E2&>>, bool> = true
+    >
+    friend constexpr bool operator==(const expected& x, const expected<T2, E2>& y) {
+        if (x.has_value() != y.has_value())
+            return false;
+        return x.has_value() ? (*x == *y) : (x.error() == y.error());
+    }
+    
+    template<
+        typename T2,
+        ::std::enable_if_t<!_internal::is_specialization_of_v<T2, expected> && _internal::expected_eq_test<const T&, const T2&>::value, bool> = true
+    >
+    friend constexpr bool operator==(const expected& x, const T2& v) {
+        return x.has_value() && static_cast<bool>(*x == v);
+    }
+    
+    template<typename E2, ::std::enable_if_t<_internal::expected_eq_test<const E&, const E2&>::value, bool> = true>
+    friend constexpr bool operator==(const expected& x, const unexpected<E2>& e) {
+        return !x.has_value() && static_cast<bool>(x.error() == e.error());
+    }
+
+#if __cpp_impl_three_way_comparison < 201907L
+    // suppliment for synthesized ops
+    template<
+        typename T2, typename E2,
+        ::std::enable_if_t<conjunction_v<_internal::expected_eq_test<const T&, const T2>, _internal::expected_eq_test<const E&, const E2&>>, bool> = true
+    >
+    friend constexpr bool operator!=(const expected& x, const expected<T2, E2>& y) {
+        return !(x == y);
+    }
+
+    template<
+        typename T2,
+        ::std::enable_if_t<!_internal::is_specialization_of_v<T2, expected> && _internal::expected_eq_test<const T&, const T2&>::value, bool> = true
+    >
+    friend constexpr bool operator!=(const expected& x, const T2& v) {
+        return !(x == v);
+    }
+    template<
+        typename T2,
+        ::std::enable_if_t<!_internal::is_specialization_of_v<T2, expected> && _internal::expected_eq_test<const T&, const T2&>::value, bool> = true
+    >
+    friend constexpr bool operator==(const T2& v, const expected& x) {
+        return x == v;
+    }
+
+    template<typename E2, ::std::enable_if_t<_internal::expected_eq_test<const E&, const E2&>::value, bool> = true>
+    friend constexpr bool operator!=(const expected& x, const unexpected<E2>& e) {
+        return !(x == e);
+    }
+    template<typename E2, ::std::enable_if_t<_internal::expected_eq_test<const E&, const E2&>::value, bool> = true>
+    friend constexpr bool operator==(const unexpected<E2>& e, const expected& x) {
+        return x == e;
+    }
+#endif
 
 private:
     friend _internal::swappable_base<T, E, expected>;
@@ -850,6 +951,33 @@ private:
 
         ::new (::std::addressof(this->_val)) T(::std::forward<Ts>(args)...);
         return this->_val;
+    }
+    
+    template<typename U, typename This_T, typename F>
+    static constexpr auto transform_impl(::std::true_type, This_T&& this_ref, F&& f) {
+        invoke(::std::forward<F>(f), *::std::forward<This_T>(this_ref));
+        return expected<U, E>();
+    }
+    template<typename U, typename This_T, typename F>
+    static constexpr auto transform_impl(::std::false_type, This_T&& this_ref, F&& f) {
+        return expected<U, E>(in_place, invoke(::std::forward<F>(f), *::std::forward<This_T>(this_ref)));
+    }
+    template<typename This_T, typename F>
+    static constexpr auto transform_impl(This_T&& this_ref, F&& f) {
+        using U = ::std::remove_cv_t<invoke_result_t<F, decltype(*::std::forward<This_T>(this_ref))>>;
+    
+        if (!this_ref._has_val)
+            return expected<U, E>(unexpect, ::std::forward<This_T>(this_ref).error());
+        return transform_impl<U>(::std::integral_constant<bool, ::std::is_void<U>::value>{}, ::std::forward<This_T>(this_ref), ::std::forward<F>(f));
+    }
+
+    template<typename This_T, typename F>
+    static constexpr auto transform_error_impl(This_T&& this_ref, F&& f) {
+        using G = ::std::remove_cv_t<invoke_result_t<F, decltype(::std::forward<This_T>(this_ref).error())>>;
+    
+        if (this_ref._has_val)
+            return expected<T, G>(in_place, *::std::forward<This_T>(this_ref));
+        return expected<T, G>(unexpect, invoke(::std::forward<F>(f), ::std::forward<This_T>(this_ref).error()));
     }
 };
 
