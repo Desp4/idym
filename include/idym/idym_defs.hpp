@@ -13,8 +13,10 @@
 
 #if __cpp_constexpr >= 201907L
   #define IDYM_INTERNAL_CXX20_CONSTEXPR_VIRTUAL constexpr
+  #define IDYM_INTERNAL_CXX20_CONSTEXPR_TRYCATCH constexpr
 #else
   #define IDYM_INTERNAL_CXX20_CONSTEXPR_VIRTUAL
+  #define IDYM_INTERNAL_CXX20_CONSTEXPR_TRYCATCH
 #endif
 
 #if __cpp_constexpr >= 202002L

@@ -19,6 +19,17 @@ struct conjunction<T, Ts...> : ::std::conditional_t<static_cast<bool>(T::value),
 template<typename... Ts>
 constexpr bool conjunction_v = conjunction<Ts...>::value;
 
+template<typename...>
+struct disjunction : ::std::false_type {};
+template<typename T>
+struct disjunction<T> : T {};
+
+template<typename T, typename... Ts>
+struct disjunction<T, Ts...> : ::std::conditional_t<static_cast<bool>(T::value), T, disjunction<Ts...>> {};
+
+template<typename... Ts>
+constexpr bool disjunction_v = disjunction<Ts...>::value;
+
 namespace _internal { // >>> internal
 
 // === make_void
