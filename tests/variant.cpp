@@ -33,61 +33,35 @@ valueless_var_t<Ts...> make_valueless() {
 namespace variant_ctor {
 
 void run_1_6() {
-    struct def_ctor {
-        def_ctor() : value{1337} {}
-        
-        int value;
-    };
-    struct def_ctor_throws {
-        def_ctor_throws() { throw idym_test::test_exception{}; }
-    };
-    struct ndef_ctor {
-        ndef_ctor() = delete;
-    };
-
-    static_assert(!std::is_default_constructible<idym::variant<ndef_ctor, int>>::value, "variant.ctor.1");
-    static_assert(std::is_default_constructible<idym::variant<int, ndef_ctor>>::value, "variant.ctor.1");
+    static_assert(!std::is_default_constructible<idym::variant<idym_test::ndef_ctor, int>>::value, "variant.ctor.1");
+    static_assert(std::is_default_constructible<idym::variant<int, idym_test::ndef_ctor>>::value, "variant.ctor.1");
     
-    static_assert(!std::is_nothrow_default_constructible<idym::variant<def_ctor_throws>>::value, "variant.ctor.6");
+    static_assert(!std::is_nothrow_default_constructible<idym::variant<idym_test::def_ctor_throws>>::value, "variant.ctor.6");
     static_assert(std::is_nothrow_default_constructible<idym::variant<int>>::value, "variant.ctor.6");
     
     {
-        idym::variant<def_ctor> v;
+        idym::variant<idym_test::def_ctor> v;
         idym_test::validate(!v.valueless_by_exception(), "variant.ctor.4");
         idym_test::validate(v.index() == 0, "variant.ctor.4");
         idym_test::validate(idym::get<0>(v).value == 1337, "variant.ctor.3");
     }
 
-    IDYM_VALIDATE_EXCEPTION("variant.ctor.5", idym::variant<def_ctor_throws, int>{});
+    IDYM_VALIDATE_EXCEPTION("variant.ctor.5", idym::variant<idym_test::def_ctor_throws, int>{});
 }
 void run_7_9() {
-    struct copy_ctor {
-        copy_ctor() = default;
-        copy_ctor(const copy_ctor& other) : value{other.value + 1} {}
-        
-        int value;
-    };
-    struct copy_ctor_throws {
-        copy_ctor_throws() = default;
-        copy_ctor_throws(const copy_ctor_throws&) { throw idym_test::test_exception{}; }
-    };
-    struct ncopy_ctor {
-        ncopy_ctor(const ncopy_ctor&) = delete;
-    };
-
     static_assert(std::is_copy_constructible<idym::variant<int>>::value, "variant.ctor.9");
     static_assert(std::is_trivially_copy_constructible<idym::variant<int>>::value, "variant.ctor.9");
 
-    static_assert(std::is_copy_constructible<idym::variant<int, copy_ctor>>::value, "variant.ctor.9");
-    static_assert(!std::is_trivially_copy_constructible<idym::variant<int, copy_ctor>>::value, "variant.ctor.9");
+    static_assert(std::is_copy_constructible<idym::variant<int, idym_test::copy_ctor>>::value, "variant.ctor.9");
+    static_assert(!std::is_trivially_copy_constructible<idym::variant<int, idym_test::copy_ctor>>::value, "variant.ctor.9");
 
-    static_assert(!std::is_copy_constructible<idym::variant<int, ncopy_ctor>>::value, "variant.ctor.9");
+    static_assert(!std::is_copy_constructible<idym::variant<int, idym_test::ncopy_ctor>>::value, "variant.ctor.9");
     
     {
-        idym::variant<copy_ctor, int> v1;
+        idym::variant<idym_test::copy_ctor, int> v1;
         idym::get<0>(v1).value = 1337;
         
-        idym::variant<copy_ctor, int> v2{v1};
+        idym::variant<idym_test::copy_ctor, int> v2{v1};
         idym_test::validate(v1.index() == v2.index(), "variant.ctor.7");
         idym_test::validate(idym::get<0>(v2).value == 1338, "variant.ctor.7");
     }
@@ -97,44 +71,30 @@ void run_7_9() {
         idym_test::validate(v2.valueless_by_exception(), "variant.ctor.7");
     }
     {
-        idym::variant<copy_ctor_throws, int> v1;
-        IDYM_VALIDATE_EXCEPTION("variant.ctor.8", idym::variant<copy_ctor_throws, int>{v1});
+        idym::variant<idym_test::copy_ctor_throws, int> v1;
+        IDYM_VALIDATE_EXCEPTION("variant.ctor.8", idym::variant<idym_test::copy_ctor_throws, int>{v1});
     }
 }
 void run_10_13() {
-    struct move_ctor {
-        move_ctor() = default;
-        move_ctor(move_ctor&& other) noexcept : value{other.value + 1} {}
-        
-        int value;
-    };
-    struct move_ctor_throws {
-        move_ctor_throws() = default;
-        move_ctor_throws(move_ctor_throws&&) { throw idym_test::test_exception{}; }
-    };
-    struct nmove_ctor {
-        nmove_ctor(nmove_ctor&&) = delete;
-    };
-
     static_assert(std::is_move_constructible<idym::variant<int>>::value, "variant.ctor.10");
     static_assert(std::is_trivially_move_constructible<idym::variant<int>>::value, "variant.ctor.13");
     static_assert(std::is_nothrow_move_constructible<idym::variant<int>>::value, "variant.ctor.13");
     
-    static_assert(std::is_move_constructible<idym::variant<int, move_ctor>>::value, "variant.ctor.10");
-    static_assert(!std::is_trivially_move_constructible<idym::variant<int, move_ctor>>::value, "variant.ctor.13");
-    static_assert(std::is_nothrow_move_constructible<idym::variant<int, move_ctor>>::value, "variant.ctor.13");
+    static_assert(std::is_move_constructible<idym::variant<int, idym_test::move_ctor>>::value, "variant.ctor.10");
+    static_assert(!std::is_trivially_move_constructible<idym::variant<int, idym_test::move_ctor>>::value, "variant.ctor.13");
+    static_assert(std::is_nothrow_move_constructible<idym::variant<int, idym_test::move_ctor>>::value, "variant.ctor.13");
     
-    static_assert(std::is_move_constructible<idym::variant<int, move_ctor_throws>>::value, "variant.ctor.10");
-    static_assert(!std::is_trivially_move_constructible<idym::variant<int, move_ctor_throws>>::value, "variant.ctor.13");
-    static_assert(!std::is_nothrow_move_constructible<idym::variant<int, move_ctor_throws>>::value, "variant.ctor.13");
+    static_assert(std::is_move_constructible<idym::variant<int, idym_test::move_ctor_throws>>::value, "variant.ctor.10");
+    static_assert(!std::is_trivially_move_constructible<idym::variant<int, idym_test::move_ctor_throws>>::value, "variant.ctor.13");
+    static_assert(!std::is_nothrow_move_constructible<idym::variant<int, idym_test::move_ctor_throws>>::value, "variant.ctor.13");
     
-    static_assert(!std::is_move_constructible<idym::variant<int, nmove_ctor>>::value, "variant.ctor.10");
+    static_assert(!std::is_move_constructible<idym::variant<int, idym_test::nmove_ctor>>::value, "variant.ctor.10");
     
     {
-        idym::variant<move_ctor, int> v1;
+        idym::variant<idym_test::move_ctor, int> v1;
         idym::get<0>(v1).value = 1337;
         
-        idym::variant<move_ctor, int> v2{std::move(v1)};
+        idym::variant<idym_test::move_ctor, int> v2{std::move(v1)};
         idym_test::validate(v1.index() == v2.index(), "variant.ctor.11");
         idym_test::validate(idym::get<0>(v2).value == 1338, "variant.ctor.11");
     }
@@ -144,8 +104,8 @@ void run_10_13() {
         idym_test::validate(v2.valueless_by_exception(), "variant.ctor.11");
     }
     {
-        idym::variant<move_ctor_throws, int> v1;
-        IDYM_VALIDATE_EXCEPTION("variant.ctor.12", idym::variant<move_ctor_throws, int>{std::move(v1)});
+        idym::variant<idym_test::move_ctor_throws, int> v1;
+        IDYM_VALIDATE_EXCEPTION("variant.ctor.12", idym::variant<idym_test::move_ctor_throws, int>{std::move(v1)});
     }
 }
 void run_14_19() {
