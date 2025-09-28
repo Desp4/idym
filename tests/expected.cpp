@@ -393,13 +393,13 @@ void run_1_2() {
 
 // [expected.object.assign]
 namespace expected_object_assign {
-template<bool Nothrow_Move>
+template<bool Nothrow_Move, bool Noexcept_Copy = false>
 struct value_type {
     value_type() = default;
-    value_type(const value_type&) : value{123} {}
+    value_type(const value_type&) noexcept(Noexcept_Copy) : value{123} {}
     value_type(value_type&&) noexcept(Nothrow_Move) : value{124} {}
     
-    value_type& operator=(const value_type&) { value = 125; return *this; }
+    value_type& operator=(const value_type&) noexcept(Noexcept_Copy) { value = 125; return *this; }
     value_type& operator=(value_type&&) noexcept(Nothrow_Move) { value = 126; return *this; }
     
     int value = 0;
@@ -445,10 +445,118 @@ void validate_assignment(const char* clause_str, int same_member, int cross_memb
 }
 
 void run_2_8() {
+    struct reinit_throws {
+        reinit_throws() = default;
+        reinit_throws(reinit_throws&&) { throw idym_test::test_exception{}; };
+        
+        reinit_throws& operator=(reinit_throws&&) { return *this; }
+    };
+
     validate_assignment<false, true>("expected.object.assign.2", 125, 124);
     validate_assignment<false, false>("expected.object.assign.2", 125, 124);
-    validate_assignment<true, true>("expected.object.assign.5", 126, 124);
-    validate_assignment<true, false>("expected.object.assign.5", 126, 124);
+    validate_assignment<true, true>("expected.object.assign.6", 126, 124);
+    validate_assignment<true, false>("expected.object.assign.6", 126, 124);
+    
+    {
+        using nothrow_value_type = value_type<true, true>;
+        idym::expected<nothrow_value_type, nothrow_value_type> ex1{idym::unexpect};
+        idym::expected<nothrow_value_type, nothrow_value_type> ex2{idym::in_place};
+        
+        ex2 = ex1;
+        idym_test::validate(ex2.has_value() == ex1.has_value(), "expected.object.assign.2");
+        idym_test::validate(ex2->value == 123, "expected.object.assign.2");
+    }
+    
+    {
+        idym::expected<reinit_throws, int> ex1{idym::in_place};
+        idym::expected<reinit_throws, int> ex2{idym::unexpect};
+        
+        IDYM_VALIDATE_EXCEPTION("expected.object.assign.6", ex2 = std::move(ex1));
+        idym_test::validate(!ex2.has_value(), "expected.object.assign.6");
+    }
+}
+void run_9_15() {
+    struct int_ctor {
+        int_ctor() = default;
+        int_ctor(int v) : value{v} {}
+        
+        int value = 0;
+    };
+
+    {
+        idym::expected<int_ctor, int> ex{};
+        ex = 123;
+        
+        idym_test::validate(ex.has_value(), "expected.object.assign.10");
+        idym_test::validate(ex->value == 123, "expected.object.assign.10");
+    }
+    {
+        idym::expected<int_ctor, int> ex{idym::unexpect};
+        ex = 123;
+        
+        idym_test::validate(ex.has_value(), "expected.object.assign.10");
+        idym_test::validate(ex->value == 123, "expected.object.assign.10");
+    }
+    
+    {
+        idym::expected<int, int_ctor> ex{};
+        ex = idym::unexpected<int>{123};
+        
+        idym_test::validate(!ex.has_value(), "expected.object.assign.14");
+        idym_test::validate(ex.error().value == 123, "expected.object.assign.14");
+    }
+    {
+        idym::expected<int, int_ctor> ex{idym::unexpect};
+        ex = idym::unexpected<int>{123};
+        
+        idym_test::validate(!ex.has_value(), "expected.object.assign.14");
+        idym_test::validate(ex.error().value == 123, "expected.object.assign.14");
+    }
+}
+void run_16_19() {
+    struct il_ctor {
+        il_ctor() = default;
+        il_ctor(std::initializer_list<int> il, int v) noexcept : value{il.begin()[0] +  v} {}
+        il_ctor(int v1, int v2) noexcept : value{v1 + v2} {}
+        
+        int value = 0;
+    };
+    
+    {
+        idym::expected<il_ctor, int> ex;
+
+        ex.emplace(4, 5);
+        idym_test::validate(ex.has_value(), "expected.object.assign.17");
+        idym_test::validate(ex->value == 9, "expected.object.assign.17");
+    }
+    {
+        idym::expected<il_ctor, int> ex;
+        
+        ex.emplace({10}, 20);
+        idym_test::validate(ex.has_value(), "expected.object.assign.19");
+        idym_test::validate(ex->value == 30, "expected.object.assign.19");
+    }
+    {
+        idym::expected<il_ctor, int> ex{idym::unexpect};
+
+        ex.emplace(4, 5);
+        idym_test::validate(ex.has_value(), "expected.object.assign.17");
+        idym_test::validate(ex->value == 9, "expected.object.assign.17");
+    }
+    {
+        idym::expected<il_ctor, int> ex{idym::unexpect};
+        
+        ex.emplace({10}, 20);
+        idym_test::validate(ex.has_value(), "expected.object.assign.19");
+        idym_test::validate(ex->value == 30, "expected.object.assign.19");
+    }
+}
+}
+
+// [expected.object.swap]
+namespace expected_object_swap {
+void run_1_5() {
+
 }
 }
 
@@ -467,6 +575,10 @@ int main(int, char**) {
     expected_object_dtor::run_1_2();
     
     expected_object_assign::run_2_8();
+    expected_object_assign::run_9_15();
+    expected_object_assign::run_16_19();
+    
+    expected_object_swap::run_1_5();
 
     return 0;
 }

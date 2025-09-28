@@ -76,6 +76,10 @@ private:
     E _unex;
 };
 
+#if __cpp_deduction_guides >= 201703L
+template<typename E> unexpected(E) -> unexpected<E>;
+#endif
+
 template<typename>
 class bad_expected_access;
 
