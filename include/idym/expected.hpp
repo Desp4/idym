@@ -385,7 +385,7 @@ constexpr bool expected_swap_noexcept_v =
     ::std::is_nothrow_move_constructible<E>::value && is_nothrow_swappable_v<E>;
 
 template<typename T, typename E>
-IDYM_INTERNAL_CXX20_CONSTEXPR_TRYCATCH void swap_expected(::std::true_type, expected_base<T, E>& this_ref, expected_base<T, E>& rhs) {
+IDYM_INTERNAL_CXX20_CONSTEXPR_TRYCATCH void swap_expected(::std::true_type, expected_def_ctor_base<T, E>& this_ref, expected_def_ctor_base<T, E>& rhs) {
     E tmp(::std::move(rhs._unex));
     rhs._unex.~E();
 
@@ -399,7 +399,7 @@ IDYM_INTERNAL_CXX20_CONSTEXPR_TRYCATCH void swap_expected(::std::true_type, expe
     }
 }
 template<typename T, typename E>
-IDYM_INTERNAL_CXX20_CONSTEXPR_TRYCATCH void swap_expected(::std::false_type, expected_base<T, E>& this_ref, expected_base<T, E>& rhs) {
+IDYM_INTERNAL_CXX20_CONSTEXPR_TRYCATCH void swap_expected(::std::false_type, expected_def_ctor_base<T, E>& this_ref, expected_def_ctor_base<T, E>& rhs) {
     T tmp(::std::move(this_ref._val));
     this_ref._val.~T();
 

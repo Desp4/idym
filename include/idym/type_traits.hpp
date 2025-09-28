@@ -1,6 +1,7 @@
 #ifndef IDYM_TYPE_TRAITS_H
 #define IDYM_TYPE_TRAITS_H
 
+#include <utility>
 #include <functional>
 #include <type_traits>
 
@@ -48,30 +49,50 @@ struct make_void {
     using type = void;
 };
 
-namespace _std_sandbox { // >>> std sandbox
-
-using namespace ::std;
-
 // === swappable_with
 template<typename T, typename U, typename = void>
-struct swappable_with : ::std::false_type {};
+struct swappable_with_adl : ::std::false_type {};
 template<typename T, typename U>
-struct swappable_with<
+struct swappable_with_adl<
     T, U,
     typename ::IDYM_NAMESPACE::_internal::make_void<decltype(swap(::std::declval<T>(), ::std::declval<U>()))>::type
 > : ::std::true_type {};
 
-// nothrow_swappable
+template<typename T, typename U, typename = void>
+struct swappable_with_std : ::std::false_type {};
 template<typename T, typename U>
-struct nothrow_swappable : ::std::integral_constant<bool,
-    noexcept(swap(::std::declval<T>(), ::std::declval<U>())) && noexcept(swap(::std::declval<U>(), ::std::declval<T>()))
-> {};
-} // <<< std sandbox
+struct swappable_with_std<
+    T, U,
+    typename ::IDYM_NAMESPACE::_internal::make_void<decltype(::std::swap(::std::declval<T>(), ::std::declval<U>()))>::type
+> : ::std::true_type {};
+
+// nothrow_swappable
+template<typename T, typename U, typename = void>
+struct nothrow_swappable_adl : std::false_type {};
 
 template<typename T, typename U>
-struct swappable_with_2 : ::std::integral_constant<bool, conjunction_v<_std_sandbox::swappable_with<T, U>, _std_sandbox::swappable_with<U, T>>> {};
+struct nothrow_swappable_adl<T, U, ::std::enable_if_t<swappable_with_adl<T, U>::value>> {
+    static constexpr auto value = noexcept(swap(::std::declval<T>(), ::std::declval<U>())) && noexcept(swap(::std::declval<U>(), ::std::declval<T>()));
+};
+
+template<typename T, typename U, typename = void>
+struct nothrow_swappable_std : std::false_type {};
+
 template<typename T, typename U>
-struct nothrow_swappable_2 : ::std::integral_constant<bool, conjunction_v<swappable_with_2<T, U>, _std_sandbox::nothrow_swappable<T, U>>> {};
+struct nothrow_swappable_std<T, U, ::std::enable_if_t<swappable_with_std<T, U>::value>> {
+    static constexpr auto value = noexcept(::std::swap(::std::declval<T>(), ::std::declval<U>())) && noexcept(::std::swap(::std::declval<U>(), ::std::declval<T>()));
+};
+
+// secondary swappable traits
+template<typename T, typename U>
+using swappable_with = ::std::integral_constant<bool, disjunction_v<swappable_with_adl<T, U>, swappable_with_std<T, U>>>;
+template<typename T, typename U>
+struct swappable_with_2 : ::std::integral_constant<bool, conjunction_v<swappable_with<T, U>, swappable_with<U, T>>> {};
+
+template<typename T, typename U>
+using nothrow_swappable = ::std::integral_constant<bool, swappable_with_adl<T, U>::value ? nothrow_swappable_adl<T, U>::value : nothrow_swappable_std<T, U>::value>;
+template<typename T, typename U>
+struct nothrow_swappable_2 : ::std::integral_constant<bool, conjunction_v<swappable_with_2<T, U>, nothrow_swappable<T, U>>> {};
 
 // === invoke impl
 template<class>
