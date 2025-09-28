@@ -555,8 +555,78 @@ void run_16_19() {
 
 // [expected.object.swap]
 namespace expected_object_swap {
-void run_1_5() {
+struct swap_throws {};
 
+void swap(swap_throws&, swap_throws&) noexcept(false) {}
+
+void run_1_5() {
+    static_assert(idym::is_nothrow_swappable<idym::expected<int, int>>::value, "expected.object.swap.4");
+    static_assert(!idym::is_nothrow_swappable<idym::expected<int, swap_throws>>::value, "expected.object.swap.4");
+
+    {
+        idym::expected<int, int> ex1{123};
+        idym::expected<int, int> ex2{124};
+        
+        swap(ex1, ex2);
+        idym_test::validate(ex1.has_value(), "expected.object.swap.2");
+        idym_test::validate(ex2.has_value(), "expected.object.swap.2");
+        idym_test::validate(*ex1 == 124, "expected.object.swap.2");
+        idym_test::validate(*ex2 == 123, "expected.object.swap.2");
+        
+        ex1.swap(ex2);
+        idym_test::validate(ex1.has_value(), "expected.object.swap.2");
+        idym_test::validate(ex2.has_value(), "expected.object.swap.2");
+        idym_test::validate(*ex1 == 123, "expected.object.swap.2");
+        idym_test::validate(*ex2 == 124, "expected.object.swap.2");
+    }
+    {
+        idym::expected<int, int> ex1{idym::unexpect, 123};
+        idym::expected<int, int> ex2{124};
+        
+        swap(ex1, ex2);
+        idym_test::validate(ex1.has_value(), "expected.object.swap.2");
+        idym_test::validate(!ex2.has_value(), "expected.object.swap.2");
+        idym_test::validate(*ex1 == 124, "expected.object.swap.2");
+        idym_test::validate(ex2.error() == 123, "expected.object.swap.2");
+        
+        ex1.swap(ex2);
+        idym_test::validate(!ex1.has_value(), "expected.object.swap.2");
+        idym_test::validate(ex2.has_value(), "expected.object.swap.2");
+        idym_test::validate(ex1.error() == 123, "expected.object.swap.2");
+        idym_test::validate(*ex2 == 124, "expected.object.swap.2");
+    }
+    {
+        idym::expected<int, int> ex1{123};
+        idym::expected<int, int> ex2{idym::unexpect, 124};
+        
+        swap(ex1, ex2);
+        idym_test::validate(!ex1.has_value(), "expected.object.swap.2");
+        idym_test::validate(ex2.has_value(), "expected.object.swap.2");
+        idym_test::validate(ex1.error() == 124, "expected.object.swap.2");
+        idym_test::validate(*ex2 == 123, "expected.object.swap.2");
+        
+        ex1.swap(ex2);
+        idym_test::validate(ex1.has_value(), "expected.object.swap.2");
+        idym_test::validate(!ex2.has_value(), "expected.object.swap.2");
+        idym_test::validate(*ex1 == 123, "expected.object.swap.2");
+        idym_test::validate(ex2.error() == 124, "expected.object.swap.2");
+    }
+    {
+        idym::expected<int, int> ex1{idym::unexpect, 123};
+        idym::expected<int, int> ex2{idym::unexpect, 124};
+        
+        swap(ex1, ex2);
+        idym_test::validate(!ex1.has_value(), "expected.object.swap.2");
+        idym_test::validate(!ex2.has_value(), "expected.object.swap.2");
+        idym_test::validate(ex1.error() == 124, "expected.object.swap.2");
+        idym_test::validate(ex2.error() == 123, "expected.object.swap.2");
+        
+        ex1.swap(ex2);
+        idym_test::validate(!ex1.has_value(), "expected.object.swap.2");
+        idym_test::validate(!ex2.has_value(), "expected.object.swap.2");
+        idym_test::validate(ex1.error() == 123, "expected.object.swap.2");
+        idym_test::validate(ex2.error() == 124, "expected.object.swap.2");
+    }
 }
 }
 
