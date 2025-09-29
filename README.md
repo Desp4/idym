@@ -1,7 +1,7 @@
-## Compliant C++14 implementation of `std::variant`
+## Compliant C++14 implementation of `std::variant` and `std::expected`
 
-The implementation includes the variant itself and supplimentary standard library features not present in C++14.
-The variant is defined as per the C++23 spec, with certain features omitted for the lack of language features dependending
+The implementation includes the classes themselves and supplimentary standard library features not present in C++14.
+Both `std::variant` and `std::expected` are defined as per the C++23 spec, with certain features omitted for the lack of language features dependending
 on the language version in use(see below).
 
 ### Building
@@ -26,14 +26,25 @@ void foo() {
 Specializations of `std::swap` and `std::hash` can be disabled by defining `IDYM_NOSTD_INTEROP`.
 
 ### Installation
-The installation of a total of three(3) headers is left as an exercise to the reader.
+Copying the include directory to a desired location is left as an exercise to the reader.
 
 ### Language versions and features
 Certain features of the implementation, as the spec defines it, will be unavailable in *C++14*. Below is a table listing the minimum
 language version required for all affected features.
+
+#### `std::variant`
 | Feature                                                                   | Required language version                |
 | :------------------------------------------------------------------------ | :--------------------------------------- |
 | Inline `in_place` and `variant_npos`                                      | *C++17(__cpp_inline_variables)*          |
-| Constexpr `variant` destructor                                            | *C++20(__cpp_constexpr)*                 |
+| Constexpr non-trivial `variant` destructor                                | *C++20(__cpp_constexpr)*                 |
 | *operator<=>* for `variant` and `monostate`                               | *C++20(__cpp_impl_three_way_comparison)* |
 | Deprecated *volatile* flavors of `variant_alternative` and `variant_size` | *C++20*                                  |
+
+#### `std::expected`
+| Feature                                                    | Required language version       |
+| :--------------------------------------------------------- | :------------------------------ |
+| Inline `unexpect`                                          | *C++17(__cpp_inline_variables)* |
+| Constexpr `bad_expected_access::what`                      | *C++20(__cpp_constexpr)*        |
+| Fully constexpr `expected::operator=` and `expected::swap` | *C++20(__cpp_constexpr)*        |
+| Constexpr non-trivial `expected` destructor                | *C++20(__cpp_constexpr)*        |
+| `unexpected` deduction guide                               | *C++17(__cpp_deduction_guides)* |
