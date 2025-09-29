@@ -514,7 +514,7 @@ constexpr auto make_monad_value_ret(::std::false_type, Value_T&& value) {
 }
 
 template<typename F, typename Value_T>
-constexpr auto make_monad_invoke_ret(::std::true_type, F&& f, Value_T&) {
+constexpr auto make_monad_invoke_ret(::std::true_type, F&& f, Value_T&&) {
     return invoke(::std::forward<F>(f));
 }
 template<typename F, typename Value_T>
