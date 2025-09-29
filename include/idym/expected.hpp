@@ -466,7 +466,9 @@ IDYM_INTERNAL_CXX20_CONSTEXPR_TRYCATCH void swap_expected(::std::false_type, exp
 }
 
 template<bool, typename T, typename E>
-struct swappable_base_impl : expected_def_ctor_base<T, E> {};
+struct swappable_base_impl : expected_def_ctor_base<T, E> {
+    using expected_def_ctor_base<T, E>::expected_def_ctor_base;
+};
 
 template<typename T, typename E>
 struct swappable_base_impl<true, T, E> : expected_def_ctor_base<T, E> {
