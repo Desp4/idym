@@ -2,6 +2,37 @@
 
 #include "idym_test.hpp"
 
+// common types
+struct int_constructible {
+    int_constructible() = delete;
+    int_constructible(const int& other) : value{other + 1} {}
+    int_constructible(int&& other) : value{other + 2} {}
+
+    int value;
+};
+struct int_constructible_throws {
+    int_constructible_throws() = delete;
+    int_constructible_throws(const int&) { throw idym_test::test_exception{}; }
+    int_constructible_throws(int&&) { throw idym_test::test_exception{}; }
+};
+
+// common traits
+template<typename T, typename E>
+constexpr bool ex_default_cons_v = std::is_default_constructible<idym::expected<T, E>>::value;
+template<typename T, typename E>
+constexpr bool ex_copy_cons_v = std::is_copy_constructible<idym::expected<T, E>>::value;
+template<typename T, typename E>
+constexpr bool ex_trivial_copy_cons = std::is_trivially_copy_constructible<idym::expected<T, E>>::value;
+template<typename T, typename E>
+constexpr bool ex_move_cons_v = std::is_move_constructible<idym::expected<T, E>>::value;
+template<typename T, typename E>
+constexpr bool ex_trivial_move_cons_v = std::is_trivially_move_constructible<idym::expected<T, E>>::value;
+template<typename T, typename E>
+constexpr bool ex_nothrow_move_cons_v = std::is_nothrow_move_constructible<idym::expected<T, E>>::value;
+
+template<typename T, typename E, typename... Ts>
+constexpr bool ex_cons_v = std::is_constructible<idym::expected<T, E>, Ts...>::value;
+
 // [expected.un.cons]
 namespace expected_un_cons {
 void run_1_9() {
@@ -101,22 +132,6 @@ void run_1_2() {
 
 // [expected.object.cons]
 namespace expected_object_cons {
-template<typename T, typename E>
-constexpr bool ex_default_cons_v = std::is_default_constructible<idym::expected<T, E>>::value;
-template<typename T, typename E>
-constexpr bool ex_copy_cons_v = std::is_copy_constructible<idym::expected<T, E>>::value;
-template<typename T, typename E>
-constexpr bool ex_trivial_copy_cons = std::is_trivially_copy_constructible<idym::expected<T, E>>::value;
-template<typename T, typename E>
-constexpr bool ex_move_cons_v = std::is_move_constructible<idym::expected<T, E>>::value;
-template<typename T, typename E>
-constexpr bool ex_trivial_move_cons_v = std::is_trivially_move_constructible<idym::expected<T, E>>::value;
-template<typename T, typename E>
-constexpr bool ex_nothrow_move_cons_v = std::is_nothrow_move_constructible<idym::expected<T, E>>::value;
-
-template<typename T, typename E, typename... Ts>
-constexpr bool ex_cons_v = std::is_constructible<idym::expected<T, E>, Ts...>::value;
-
 void run_1_5() {
     static_assert(!ex_default_cons_v<idym_test::ndef_ctor, int>, "expected.object.cons.2");
     static_assert(ex_default_cons_v<idym_test::def_ctor, int>, "expected.object.cons.2");
@@ -134,7 +149,7 @@ void run_6_10() {
     static_assert(!ex_copy_cons_v<idym_test::ncopy_ctor, int>, "expected.object.cons.9");
     static_assert(!ex_copy_cons_v<int, idym_test::ncopy_ctor>, "expected.object.cons.9");
     static_assert(!ex_copy_cons_v<idym_test::ncopy_ctor, idym_test::ncopy_ctor>, "expected.object.cons.9");
-    
+
     static_assert(ex_trivial_copy_cons<int, int>, "expected.object.cons.10");
     static_assert(!ex_trivial_copy_cons<idym_test::copy_ctor, int>, "expected.object.cons.10");
     static_assert(!ex_trivial_copy_cons<int, idym_test::copy_ctor>, "expected.object.cons.10");
@@ -207,19 +222,6 @@ void run_11_16() {
     }
 }
 void run_17_22() {
-    struct int_constructible {
-        int_constructible() = delete;
-        int_constructible(const int& other) : value{other + 1} {}
-        int_constructible(int&& other) : value{other + 2} {}
-    
-        int value;
-    };
-    struct int_constructible_throws {
-        int_constructible_throws() = delete;
-        int_constructible_throws(const int&) { throw idym_test::test_exception{}; }
-        int_constructible_throws(int&&) { throw idym_test::test_exception{}; }
-    };
-
     static_assert(ex_cons_v<int, double, idym::expected<short, float>&&>, "expected.object.cons.18");
     static_assert(!ex_cons_v<int, double, idym::expected<void*, float>&&>, "expected.object.cons.18");
     
@@ -988,6 +990,122 @@ void run_5_6() {
 }
 }
 
+/*
+ * most of void is shared with the primary template, so
+ * some cases are omitted for brevity(CBA)
+ */
+
+// [expected.void.cons]
+namespace expected_void_cons {
+void run_1() {
+    {
+        idym::expected<void, int> ex{};
+        idym_test::validate(ex.has_value(), "expected.void.cons.1");
+    }
+    {
+        idym::expected<volatile void, int> ex{};
+        idym_test::validate(ex.has_value(), "expected.void.cons.1");
+    }
+}
+void run_2_6() {
+    static_assert(ex_copy_cons_v<void, idym_test::copy_ctor>, "expected.void.cons.5");
+    static_assert(!ex_copy_cons_v<void, idym_test::ncopy_ctor>, "expected.void.cons.5");
+
+    static_assert(ex_trivial_copy_cons<void, int>, "expected.void.cons.6");
+    static_assert(!ex_trivial_copy_cons<void, idym_test::copy_ctor>, "expected.void.cons.6");
+
+    {
+        idym::expected<void, idym_test::copy_ctor> ex1{};
+        auto ex2 = ex1;
+
+        idym_test::validate(ex1.has_value(), "expected.void.cons.2");
+        idym_test::validate(ex1.has_value() == ex2.has_value(), "expected.void.cons.2");
+    }
+    {
+        idym::expected<void, idym_test::copy_ctor> ex1{idym::unexpect};
+        auto ex2 = ex1;
+
+        idym_test::validate(!ex1.has_value(), "expected.void.cons.2");
+        idym_test::validate(ex1.has_value() == ex2.has_value(), "expected.void.cons.2");
+        idym_test::validate(ex2.error().value == 1, "expected.void.cons.2");
+    }
+    {
+        idym::expected<void, idym_test::copy_ctor_throws> ex1{idym::unexpect};
+        IDYM_VALIDATE_EXCEPTION("expected.void.cons.9", idym::expected<void, idym_test::copy_ctor_throws>{ex1});
+    }
+}
+void run_7_11() {
+    static_assert(ex_move_cons_v<void, idym_test::move_ctor>, "expected.void.cons.7");
+    static_assert(!ex_move_cons_v<void, idym_test::nmove_ctor>, "expected.void.cons.7");
+
+    static_assert(ex_trivial_move_cons_v<void, int>, "expected.void.cons.11");
+    static_assert(!ex_trivial_move_cons_v<void, idym_test::move_ctor>, "expected.void.cons.11");
+
+    static_assert(ex_nothrow_move_cons_v<void, int>, "expected.void.cons.7");
+    static_assert(!ex_nothrow_move_cons_v<void, idym_test::move_ctor_throws>, "expected.void.cons.7");
+
+    {
+        idym::expected<void, idym_test::move_ctor> ex1{};
+        auto ex2 = std::move(ex1);
+
+        idym_test::validate(ex1.has_value(), "expected.void.cons.8");
+        idym_test::validate(ex1.has_value() == ex2.has_value(), "expected.void.cons.8");
+    }
+    {
+        idym::expected<void, idym_test::move_ctor> ex1{idym::unexpect};
+        auto ex2 = std::move(ex1);
+
+        idym_test::validate(!ex1.has_value(), "expected.void.cons.8");
+        idym_test::validate(ex1.has_value() == ex2.has_value(), "expected.void.cons.8");
+        idym_test::validate(ex2.error().value == 1, "expected.void.cons.8");
+    }
+    {
+        idym::expected<void, idym_test::move_ctor_throws> ex1{idym::unexpect};
+        IDYM_VALIDATE_EXCEPTION("expected.void.cons.10", idym::expected<void, idym_test::move_ctor_throws>{std::move(ex1)});
+    }
+}
+void run_12_16() {
+    static_assert(ex_cons_v<void, double, idym::expected<const void, float>&&>, "expected.void.cons.13");
+    static_assert(!ex_cons_v<void, double, idym::expected<const void, void*>&&>, "expected.void.cons.13");
+
+    static_assert(ex_cons_v<void, double, const idym::expected<const void, float>&>, "expected.void.cons.13");
+    static_assert(!ex_cons_v<void, double, const idym::expected<const void, void*>&>, "expected.void.cons.13");
+
+    {
+        const idym::expected<void, int> ex1{};
+        const idym::expected<const void, int> ex2{ex1};
+
+        idym_test::validate(ex1.has_value(), "expected.void.cons.15");
+        idym_test::validate(ex1.has_value() == ex2.has_value(), "expected.void.cons.15");
+    }
+    {
+        const idym::expected<void, int> ex1{idym::unexpect, 123};
+        const idym::expected<const volatile void, int_constructible> ex2{ex1};
+
+        idym_test::validate(!ex1.has_value(), "expected.void.cons.15");
+        idym_test::validate(ex1.has_value() == ex2.has_value(), "expected.void.cons.15");
+        idym_test::validate(ex2.error().value == 124, "expected.void.cons.14");
+        IDYM_VALIDATE_EXCEPTION("expected.void.cons.16", idym::expected<volatile void, int_constructible_throws>{ex1});
+    }
+    {
+        idym::expected<void, int> ex1{};
+        const idym::expected<const void, int> ex2{std::move(ex1)};
+
+        idym_test::validate(ex1.has_value(), "expected.void.cons.15");
+        idym_test::validate(ex1.has_value() == ex2.has_value(), "expected.void.cons.15");
+    }
+    {
+        idym::expected<void, int> ex1{idym::unexpect, 123};
+        const idym::expected<const volatile void, int_constructible> ex2{std::move(ex1)};
+
+        idym_test::validate(!ex1.has_value(), "expected.void.cons.15");
+        idym_test::validate(ex1.has_value() == ex2.has_value(), "expected.void.cons.15");
+        idym_test::validate(ex2.error().value == 125, "expected.void.cons.14");
+        IDYM_VALIDATE_EXCEPTION("expected.void.cons.16", idym::expected<volatile void, int_constructible_throws>{std::move(ex1)});
+    }
+}
+}
+
 int main(int, char**) {
     expected_un_cons::run_1_9();
     expected_un_obs::run_1_2();
@@ -1023,6 +1141,11 @@ int main(int, char**) {
     expected_object_eq::run_1_2();
     expected_object_eq::run_3_4();
     expected_object_eq::run_5_6();
+
+    expected_void_cons::run_1();
+    expected_void_cons::run_2_6();
+    expected_void_cons::run_7_11();
+    expected_void_cons::run_12_16();
 
     return 0;
 }
