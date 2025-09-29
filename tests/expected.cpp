@@ -630,6 +630,364 @@ void run_1_5() {
 }
 }
 
+// [expected.object.obs]
+namespace expected_object_obs {
+template<typename Expr_T, typename Expected_T>
+constexpr bool ex_expr_ret_v = std::is_same<Expr_T, Expected_T>::value;
+
+void run_1_2() {
+    struct int_member {
+        int value;
+    };
+
+    static_assert(ex_expr_ret_v<decltype(std::declval<idym::expected<int, int>&>().operator->()), int*>, "expected.object.obs.2");
+    static_assert(ex_expr_ret_v<decltype(std::declval<const idym::expected<int, int>&>().operator->()), const int*>, "expected.object.obs.2");
+
+    {
+        idym::expected<int_member, int> ex{int_member{123}};
+        idym_test::validate(ex->value == 123, "expected.object.obs.2");
+    }
+}
+void run_3_6() {
+    static_assert(ex_expr_ret_v<decltype(*std::declval<idym::expected<int, int>&>()), int&>, "expected.object.obs.4");
+    static_assert(ex_expr_ret_v<decltype(*std::declval<const idym::expected<int, int>&>()), const int&>, "expected.object.obs.4");
+
+    static_assert(ex_expr_ret_v<decltype(*std::declval<idym::expected<int, int>&&>()), int&&>, "expected.object.obs.6");
+    static_assert(ex_expr_ret_v<decltype(*std::declval<const idym::expected<int, int>&&>()), const int&&>, "expected.object.obs.6");
+
+    {
+        idym::expected<int, int> ex{123};
+        idym_test::validate(*ex == 123, "expected.object.obs.4");
+        idym_test::validate(*std::move(ex) == 123, "expected.object.obs.6");
+    }
+}
+void run_7() {
+    {
+        idym::expected<int, int> ex{idym::in_place};
+        idym_test::validate(ex.has_value(), "expected.object.obs.7");
+        idym_test::validate(static_cast<bool>(ex), "expected.object.obs.7");
+    }
+    {
+        idym::expected<int, int> ex{idym::unexpect};
+        idym_test::validate(!ex.has_value(), "expected.object.obs.7");
+        idym_test::validate(!static_cast<bool>(ex), "expected.object.obs.7");
+    }
+}
+void run_8_13() {
+    static_assert(ex_expr_ret_v<decltype(std::declval<idym::expected<int, int>&>().value()), int&>, "expected.object.obs.9");
+    static_assert(ex_expr_ret_v<decltype(std::declval<const idym::expected<int, int>&>().value()), const int&>, "expected.object.obs.9");
+
+    static_assert(ex_expr_ret_v<decltype(std::declval<idym::expected<int, int>&&>().value()), int&&>, "expected.object.obs.12");
+    static_assert(ex_expr_ret_v<decltype(std::declval<const idym::expected<int, int>&&>().value()), const int&&>, "expected.object.obs.12");
+
+    {
+        idym::expected<int, int> ex{123};
+        idym_test::validate(ex.value() == 123, "expected.object.obs.9");
+        idym_test::validate(std::move(ex).value() == 123, "expected.object.obs.12");
+    }
+    {
+        idym::expected<int, int> ex{idym::unexpect, 123};
+
+        bool caught = false;
+        try {
+            ex.value();
+        } catch (idym::bad_expected_access<int> v) {
+            caught = v.error() == 123;
+        }
+        idym_test::validate(caught, "expected.object.obs.10");
+    }
+    {
+        idym::expected<int, int> ex{idym::unexpect, 123};
+
+        bool caught = false;
+        try {
+            std::move(ex).value();
+        } catch (idym::bad_expected_access<int> v) {
+            caught = v.error() == 123;
+        }
+        idym_test::validate(caught, "expected.object.obs.13");
+    }
+}
+void run_14_17() {
+    static_assert(ex_expr_ret_v<decltype(std::declval<idym::expected<int, int>&>().error()), int&>, "expected.object.obs.15");
+    static_assert(ex_expr_ret_v<decltype(std::declval<const idym::expected<int, int>&>().error()), const int&>, "expected.object.obs.15");
+
+    static_assert(ex_expr_ret_v<decltype(std::declval<idym::expected<int, int>&&>().error()), int&&>, "expected.object.obs.17");
+    static_assert(ex_expr_ret_v<decltype(std::declval<const idym::expected<int, int>&&>().error()), const int&&>, "expected.object.obs.17");
+
+    {
+        idym::expected<int, int> ex{idym::unexpect, 123};
+        idym_test::validate(ex.error() == 123, "expected.object.obs.15");
+        idym_test::validate(std::move(ex).error() == 123, "expected.object.obs.17");
+    }
+}
+void run_18_25() {
+    {
+        idym::expected<int, int> ex{idym::in_place, 123};
+        idym_test::validate(ex.value_or(124) == 123, "expected.object.obs.19");
+        idym_test::validate(ex.error_or(124) == 124, "expected.object.obs.23");
+
+        idym_test::validate(std::move(ex).value_or(124) == 123, "expected.object.obs.21");
+        idym_test::validate(std::move(ex).error_or(124) == 124, "expected.object.obs.25");
+    }
+    {
+        idym::expected<int, int> ex{idym::unexpect, 123};
+        idym_test::validate(ex.value_or(124) == 124, "expected.object.obs.19");
+        idym_test::validate(ex.error_or(124) == 123, "expected.object.obs.23");
+
+        idym_test::validate(std::move(ex).value_or(124) == 124, "expected.object.obs.21");
+        idym_test::validate(std::move(ex).error_or(124) == 123, "expected.object.obs.25");
+    }
+}
+}
+
+namespace expected_object_monadic {
+idym::expected<short, short> consume_value(int value) {
+    return idym::expected<short, short>{idym::in_place, value + 1};
+}
+idym::expected<long, long> consume_unex(short value) {
+    return idym::expected<long, long>{idym::unexpect, value + 2};
+}
+
+short consume_value2(int value) {
+    return value + 3;
+}
+long consume_unex2(int value) {
+    return value + 4;
+}
+
+void run_1_8() {
+    {
+        idym::expected<int, short> ex{idym::in_place, 123};
+
+        const auto ret1 = ex.and_then(consume_value);
+        idym_test::validate(ret1.has_value(), "expected.object.monadic.4");
+        idym_test::validate(*ret1 == 124, "expected.object.monadic.4");
+
+        const auto ret2 = std::move(ex).and_then(consume_value);
+        idym_test::validate(ret2.has_value(), "expected.object.monadic.8");
+        idym_test::validate(*ret2 == 124, "expected.object.monadic.8");
+
+        static_assert(std::is_same<idym::remove_cvref_t<decltype(ret1)>, idym::expected<short, short>>::value, "expected.object.monadic.4");
+        static_assert(std::is_same<idym::remove_cvref_t<decltype(ret2)>, idym::expected<short, short>>::value, "expected.object.monadic.8");
+    }
+    {
+        idym::expected<int, short> ex{idym::unexpect, 123};
+
+        const auto ret1 = ex.and_then(consume_value);
+        idym_test::validate(!ret1.has_value(), "expected.object.monadic.4");
+        idym_test::validate(ret1.error() == 123, "expected.object.monadic.4");
+
+        const auto ret2 = std::move(ex).and_then(consume_value);
+        idym_test::validate(!ret2.has_value(), "expected.object.monadic.8");
+        idym_test::validate(ret2.error() == 123, "expected.object.monadic.8");
+
+        static_assert(std::is_same<idym::remove_cvref_t<decltype(ret1)>, idym::expected<short, short>>::value, "expected.object.monadic.4");
+        static_assert(std::is_same<idym::remove_cvref_t<decltype(ret2)>, idym::expected<short, short>>::value, "expected.object.monadic.8");
+    }
+}
+void run_9_16() {
+    {
+        idym::expected<int, short> ex{idym::in_place, 123};
+
+        const auto ret1 = ex.or_else(consume_unex);
+        idym_test::validate(ret1.has_value(), "expected.object.monadic.12");
+        idym_test::validate(*ret1 == 123, "expected.object.monadic.12");
+
+        const auto ret2 = std::move(ex).or_else(consume_unex);
+        idym_test::validate(ret2.has_value(), "expected.object.monadic.16");
+        idym_test::validate(*ret2 == 123, "expected.object.monadic.8");
+
+        static_assert(std::is_same<idym::remove_cvref_t<decltype(ret1)>, idym::expected<long, long>>::value, "expected.object.monadic.12");
+        static_assert(std::is_same<idym::remove_cvref_t<decltype(ret2)>, idym::expected<long, long>>::value, "expected.object.monadic.16");
+    }
+    {
+        idym::expected<int, short> ex{idym::unexpect, 123};
+
+        const auto ret1 = ex.or_else(consume_unex);
+        idym_test::validate(!ret1.has_value(), "expected.object.monadic.12");
+        idym_test::validate(ret1.error() == 125, "expected.object.monadic.12");
+
+        const auto ret2 = std::move(ex).or_else(consume_unex);
+        idym_test::validate(!ret2.has_value(), "expected.object.monadic.16");
+        idym_test::validate(ret2.error() == 125, "expected.object.monadic.8");
+
+        static_assert(std::is_same<idym::remove_cvref_t<decltype(ret1)>, idym::expected<long, long>>::value, "expected.object.monadic.12");
+        static_assert(std::is_same<idym::remove_cvref_t<decltype(ret2)>, idym::expected<long, long>>::value, "expected.object.monadic.16");
+    }
+}
+void run_17_24() {
+    {
+        idym::expected<int, short> ex{idym::in_place, 123};
+
+        const auto ret1 = ex.transform(consume_value2);
+        idym_test::validate(ret1.has_value(), "expected.object.monadic.20");
+        idym_test::validate(*ret1 == 126, "expected.object.monadic.20");
+
+        const auto ret2 = std::move(ex).transform(consume_value2);
+        idym_test::validate(ret2.has_value(), "expected.object.monadic.24");
+        idym_test::validate(*ret2 == 126, "expected.object.monadic.24");
+
+        static_assert(std::is_same<idym::remove_cvref_t<decltype(ret1)>, idym::expected<short, short>>::value, "expected.object.monadic.20");
+        static_assert(std::is_same<idym::remove_cvref_t<decltype(ret2)>, idym::expected<short, short>>::value, "expected.object.monadic.24");
+    }
+    {
+        idym::expected<int, short> ex{idym::unexpect, 123};
+
+        const auto ret1 = ex.transform(consume_value2);
+        idym_test::validate(!ret1.has_value(), "expected.object.monadic.20");
+        idym_test::validate(ret1.error() == 123, "expected.object.monadic.20");
+
+        const auto ret2 = std::move(ex).transform(consume_value2);
+        idym_test::validate(!ret1.has_value(), "expected.object.monadic.24");
+        idym_test::validate(ret1.error() == 123, "expected.object.monadic.24");
+
+        static_assert(std::is_same<idym::remove_cvref_t<decltype(ret1)>, idym::expected<short, short>>::value, "expected.object.monadic.20");
+        static_assert(std::is_same<idym::remove_cvref_t<decltype(ret2)>, idym::expected<short, short>>::value, "expected.object.monadic.24");
+    }
+    // TODO voids when you finish void specializations
+}
+void run_25_32() {
+    {
+        idym::expected<int, short> ex{idym::in_place, 123};
+
+        const auto ret1 = ex.transform_error(consume_unex2);
+        idym_test::validate(ret1.has_value(), "expected.object.monadic.28");
+        idym_test::validate(*ret1 == 123, "expected.object.monadic.28");
+
+        const auto ret2 = std::move(ex).transform_error(consume_unex2);
+        idym_test::validate(ret2.has_value(), "expected.object.monadic.32");
+        idym_test::validate(*ret2 == 123, "expected.object.monadic.32");
+
+        static_assert(std::is_same<idym::remove_cvref_t<decltype(ret1)>, idym::expected<int, long>>::value, "expected.object.monadic.28");
+        static_assert(std::is_same<idym::remove_cvref_t<decltype(ret2)>, idym::expected<int, long>>::value, "expected.object.monadic.32");
+    }
+    {
+        idym::expected<int, short> ex{idym::unexpect, 123};
+
+        const auto ret1 = ex.transform_error(consume_unex2);
+        idym_test::validate(!ret1.has_value(), "expected.object.monadic.28");
+        idym_test::validate(ret1.error() == 127, "expected.object.monadic.28");
+
+        const auto ret2 = std::move(ex).transform_error(consume_unex2);
+        idym_test::validate(!ret1.has_value(), "expected.object.monadic.32");
+        idym_test::validate(ret1.error() == 127, "expected.object.monadic.32");
+
+        static_assert(std::is_same<idym::remove_cvref_t<decltype(ret1)>, idym::expected<int, long>>::value, "expected.object.monadic.28");
+        static_assert(std::is_same<idym::remove_cvref_t<decltype(ret2)>, idym::expected<int, long>>::value, "expected.object.monadic.32");
+    }
+}
+}
+
+// [expected.object.eq]
+namespace expected_object_eq {
+void run_1_2() {
+    {
+        idym::expected<int, short> ex1{idym::in_place, 123};
+        idym::expected<long, char> ex2{idym::in_place, 123};
+
+        idym_test::validate(ex1 == ex2, "expected.object.eq.2");
+        idym_test::validate(ex2 == ex2, "expected.object.eq.2");
+        idym_test::validate(!(ex1 != ex2), "expected.object.eq.2");
+        idym_test::validate(!(ex2 != ex2), "expected.object.eq.2");
+    }
+    {
+        idym::expected<int, short> ex1{idym::in_place, 123};
+        idym::expected<long, char> ex2{idym::in_place, 124};
+
+        idym_test::validate(!(ex1 == ex2), "expected.object.eq.2");
+        idym_test::validate(!(ex2 == ex1), "expected.object.eq.2");
+        idym_test::validate(ex1 != ex2, "expected.object.eq.2");
+        idym_test::validate(ex2 != ex1, "expected.object.eq.2");
+    }
+    {
+        idym::expected<int, short> ex1{idym::unexpect, 123};
+        idym::expected<long, char> ex2{idym::unexpect, 123};
+
+        idym_test::validate(ex1 == ex2, "expected.object.eq.2");
+        idym_test::validate(ex2 == ex1, "expected.object.eq.2");
+        idym_test::validate(!(ex1 != ex2), "expected.object.eq.2");
+        idym_test::validate(!(ex2 != ex1), "expected.object.eq.2");
+    }
+    {
+        idym::expected<int, short> ex1{idym::unexpect, 123};
+        idym::expected<long, char> ex2{idym::unexpect, 124};
+
+        idym_test::validate(!(ex1 == ex2), "expected.object.eq.2");
+        idym_test::validate(!(ex2 == ex1), "expected.object.eq.2");
+        idym_test::validate(ex1 != ex2, "expected.object.eq.2");
+        idym_test::validate(ex2 != ex1, "expected.object.eq.2");
+    }
+    {
+        idym::expected<int, short> ex1{idym::unexpect, 123};
+        idym::expected<long, char> ex2{idym::in_place, 124};
+
+        idym_test::validate(!(ex1 == ex2), "expected.object.eq.2");
+        idym_test::validate(!(ex2 == ex1), "expected.object.eq.2");
+        idym_test::validate(ex1 != ex2, "expected.object.eq.2");
+        idym_test::validate(ex2 != ex1, "expected.object.eq.2");
+    }
+}
+void run_3_4() {
+    {
+        idym::expected<int, short> ex{idym::in_place, 123};
+        long value = 123;
+
+        idym_test::validate(ex == value, "expected.object.eq.4");
+        idym_test::validate(value == ex, "expected.object.eq.4");
+        idym_test::validate(!(ex != value), "expected.object.eq.4");
+        idym_test::validate(!(value != ex), "expected.object.eq.4");
+    }
+    {
+        idym::expected<int, short> ex{idym::unexpect, 123};
+        long value = 123;
+
+        idym_test::validate(!(ex == value), "expected.object.eq.4");
+        idym_test::validate(!(value == ex), "expected.object.eq.4");
+        idym_test::validate(ex != value, "expected.object.eq.4");
+        idym_test::validate(value != ex, "expected.object.eq.4");
+    }
+    {
+        idym::expected<int, short> ex{idym::in_place, 123};
+        long value = 124;
+
+        idym_test::validate(!(ex == value), "expected.object.eq.4");
+        idym_test::validate(!(value == ex), "expected.object.eq.4");
+        idym_test::validate(ex != value, "expected.object.eq.4");
+        idym_test::validate(value != ex, "expected.object.eq.4");
+    }
+}
+void run_5_6() {
+    {
+        idym::expected<int, short> ex{idym::unexpect, 123};
+        idym::unexpected<long> value{123};
+
+        idym_test::validate(ex == value, "expected.object.eq.6");
+        idym_test::validate(value == ex, "expected.object.eq.6");
+        idym_test::validate(!(ex != value), "expected.object.eq.6");
+        idym_test::validate(!(value != ex), "expected.object.eq.6");
+    }
+    {
+        idym::expected<int, short> ex{idym::in_place, 123};
+        idym::unexpected<long> value{123};
+
+        idym_test::validate(!(ex == value), "expected.object.eq.6");
+        idym_test::validate(!(value == ex), "expected.object.eq.6");
+        idym_test::validate(ex != value, "expected.object.eq.6");
+        idym_test::validate(value != ex, "expected.object.eq.6");
+    }
+    {
+        idym::expected<int, short> ex{idym::unexpect, 123};
+        idym::unexpected<long> value{124};
+
+        idym_test::validate(!(ex == value), "expected.object.eq.6");
+        idym_test::validate(!(value == ex), "expected.object.eq.6");
+        idym_test::validate(ex != value, "expected.object.eq.6");
+        idym_test::validate(value != ex, "expected.object.eq.6");
+    }
+}
+}
+
 int main(int, char**) {
     expected_un_cons::run_1_9();
     expected_un_obs::run_1_2();
@@ -649,6 +1007,22 @@ int main(int, char**) {
     expected_object_assign::run_16_19();
     
     expected_object_swap::run_1_5();
+
+    expected_object_obs::run_1_2();
+    expected_object_obs::run_3_6();
+    expected_object_obs::run_7();
+    expected_object_obs::run_8_13();
+    expected_object_obs::run_14_17();
+    expected_object_obs::run_18_25();
+
+    expected_object_monadic::run_1_8();
+    expected_object_monadic::run_9_16();
+    expected_object_monadic::run_17_24();
+    expected_object_monadic::run_25_32();
+
+    expected_object_eq::run_1_2();
+    expected_object_eq::run_3_4();
+    expected_object_eq::run_5_6();
 
     return 0;
 }
