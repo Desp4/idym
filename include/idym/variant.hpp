@@ -8,22 +8,12 @@
 #include <functional>
 #include <initializer_list>
 
-#ifndef IDYM_NAMESPACE
-  #define IDYM_NAMESPACE idym
-#endif
-
 #if __cpp_impl_three_way_comparison >= 201907L
   #include <compare>
 #endif
 
 #include "type_traits.hpp"
 #include "utility.hpp"
-
-#if __cpp_constexpr >= 202002L
-  #define IDYM_INTERNAL_CXX20_CONSTEXPR_DTOR constexpr
-#else
-  #define IDYM_INTERNAL_CXX20_CONSTEXPR_DTOR
-#endif
 
 #if __cplusplus >= 202002L
   #define IDYM_INTERNAL_CXX20_DEPRECATED_VARIANT [[deprecated]]
@@ -63,70 +53,6 @@ public:
 };
 
 namespace _internal { // >>> internal
-
-// === INVOKE compat
-#if __cpp_lib_invoke >= 201411L
-  #define IDYM_INTERNAL_INVOKE ::std::invoke
-#else
-  #define IDYM_INTERNAL_INVOKE _internal::invoke
-
-template<class>
-constexpr bool is_reference_wrapper_v = false;
-template<class U>
-constexpr bool is_reference_wrapper_v<::std::reference_wrapper<U>> = true;
-
-// function case
-template<typename Member, typename Object, typename... Args>
-constexpr decltype(auto) invoke_member(::std::true_type, ::std::integral_constant<::std::size_t, 0>, Member member, Object&& object, Args&&... args) {
-    return (::std::forward<Object>(object).*member)(::std::forward<Args>(args)...);
-}
-template<typename Member, typename Object, typename... Args>
-constexpr decltype(auto) invoke_member(::std::true_type, ::std::integral_constant<::std::size_t, 1>, Member member, Object&& object, Args&&... args) {
-    return (object.get().*member)(::std::forward<Args>(args)...);
-}
-template<typename Member, typename Object, typename... Args>
-constexpr decltype(auto) invoke_member(::std::true_type, ::std::integral_constant<::std::size_t, 2>, Member member, Object&& object, Args&&... args) {
-    return ((*::std::forward<Object>(object)).*member)(::std::forward<Args>(args)...);
-}
-// variable case
-template<typename Member, typename Object>
-constexpr decltype(auto) invoke_member(::std::false_type, ::std::integral_constant<::std::size_t, 0>, Member member, Object&& object) {
-    return ::std::forward<Object>(object).*member;
-}
-template<typename Member, typename Object>
-constexpr decltype(auto) invoke_member(::std::false_type, ::std::integral_constant<::std::size_t, 1>, Member member, Object&& object) {
-    return object.get().*member;
-}
-template<typename Member, typename Object>
-constexpr decltype(auto) invoke_member(::std::false_type, ::std::integral_constant<::std::size_t, 2>, Member member, Object&& object) {
-    return (*::std::forward<Object>(object)).*member;
-}
-
-template<typename C, typename Pointed, typename Object, typename... Args>
-constexpr decltype(auto) invoke2(::std::true_type, Pointed C::* member, Object&& object, Args&&... args) {
-    using object_t = remove_cvref_t<Object>;
-    constexpr bool is_wrapped = is_reference_wrapper_v<object_t>;
-    constexpr bool is_derived_object = ::std::is_same<C, object_t>::value || ::std::is_base_of<C, object_t>::value;
-    constexpr ::std::size_t dispatch_ind = is_derived_object ? 0 : (is_wrapped ? 1 : 2);
-    
-    return invoke_member(
-        ::std::is_function<Pointed>{}, ::std::integral_constant<::std::size_t, dispatch_ind>{},
-        member, ::std::forward<Object>(object), ::std::forward<Args>(args)...
-    );
-}
-template<typename F, typename... Args>
-constexpr decltype(auto) invoke2(::std::false_type, F&& f, Args&&... args) {
-    return ::std::forward<F>(f)(::std::forward<Args>(args)...);
-}
-
-template<typename F, typename... Args>
-constexpr decltype(auto) invoke(F&& f, Args&&... args) {
-    return invoke2(::std::is_member_pointer<remove_cvref_t<F>>{}, ::std::forward<F>(f), ::std::forward<Args>(args)...);
-}
-#endif
-
-// == dummy_t
-struct dummy_t {};
 
 // === first_of
 template<typename T, typename... Ts>
@@ -226,7 +152,7 @@ struct dispatch_variant_storage;
 template<typename Ret_T, ::std::size_t... Is, typename Visitor_T, typename... Storage_Ts>
 struct dispatch_variant_storage<Ret_T, ::std::index_sequence<Is...>, Visitor_T, Storage_Ts...> {
     static constexpr Ret_T do_dispatch(Visitor_T visitor, Storage_Ts... vs) {
-        return IDYM_INTERNAL_INVOKE(::std::forward<Visitor_T>(visitor), get_variant_storage<Is>::do_get_ref(::std::forward<decltype(vs)>(vs))...);
+        return invoke(::std::forward<Visitor_T>(visitor), get_variant_storage<Is>::do_get_ref(::std::forward<decltype(vs)>(vs))...);
     }
 };
 
@@ -1251,7 +1177,7 @@ struct verify_invoke_rets<
 template<typename Visitor_T, typename Expected_T, typename... Arg_Ts>
 struct verify_invoke_rets<Visitor_T, Expected_T, alt_visitor_accumulator<Arg_Ts...>> : ::std::is_same<
     Expected_T,
-    decltype(IDYM_INTERNAL_INVOKE(::std::declval<Visitor_T>(), ::std::declval<Arg_Ts>()...))
+    decltype(invoke(::std::declval<Visitor_T>(), ::std::declval<Arg_Ts>()...))
 > {};
 
 } // <<< internal
@@ -1271,7 +1197,7 @@ constexpr Ret_T visit(Visitor&& vis, Variants&&... vars) {
 }
 template<typename Visitor, typename... Variants>
 constexpr decltype(auto) visit(Visitor&& vis, Variants&&... vars) {
-    using ret_t = decltype(IDYM_INTERNAL_INVOKE(::std::declval<Visitor>(), get<0>(::std::declval<Variants>())...));
+    using ret_t = decltype(invoke(::std::declval<Visitor>(), get<0>(::std::declval<Variants>())...));
     constexpr bool matching_rets = _internal::verify_invoke_rets<
         Visitor,
         ret_t,
