@@ -29,7 +29,7 @@ Specializations of `std::swap` and `std::hash` can be disabled by defining `IDYM
 Copying the include directory to a desired location is left as an exercise to the reader.
 
 ### Language versions and features
-Certain features of the implementation, as the spec defines it, will be unavailable in *C++14*. Below is a table listing the minimum
+Certain features of the implementation, as the spec defines it, will be unavailable in *C++14*. Below are the tables listing the minimum
 language version required for all affected features.
 
 #### `std::variant`
