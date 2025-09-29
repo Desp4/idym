@@ -142,7 +142,9 @@ constexpr bool expected_move_ass_noexcept_v =
     ::std::is_nothrow_move_assignable<E>::value && ::std::is_nothrow_move_constructible<E>::value;
 
 // === expected_value_member
-union empty_union {};
+union empty_union {
+    friend constexpr void swap(empty_union&, empty_union&) noexcept {}
+};
 
 template<typename T>
 using expected_value_member_t = ::std::conditional_t<::std::is_void<T>::value, empty_union, T>;
@@ -182,10 +184,9 @@ struct expected_base_impl<false, T, E> {
 };
 
 template<typename T, typename E>
-using expected_base = expected_base_impl<
-    (::std::is_void<T>::value || ::std::is_trivially_destructible<T>::value) && ::std::is_trivially_destructible<E>::value,
-    T, E
->;
+struct expected_base : protected expected_base_impl<
+    (::std::is_void<T>::value || ::std::is_trivially_destructible<T>::value) && ::std::is_trivially_destructible<E>::value, T, E
+> {};
 
 // === reinit_expected
 template<typename T, typename U, typename... Args>
@@ -399,19 +400,143 @@ struct expected_eq_test : ::std::false_type {};
 template<typename T1, typename T2>
 struct expected_eq_test<T1, T2, void_t<decltype(static_cast<bool>(::std::declval<T1>() == ::std::declval<T2>()))>> : ::std::true_type {};
 
+template<typename T1, typename T2>
+constexpr bool expected_eq_test_v = expected_eq_test<T1, T2>::value;
+
+template<typename T1, typename T2>
+constexpr bool compare_expected_values(::std::true_type, const T1&, const T2&) {
+    return true;
+}
+template<typename T1, typename T2>
+constexpr bool compare_expected_values(::std::false_type, const T1& x, const T2& y) {
+    return *x == *y;
+}
+
 template<typename F, typename T1, typename T2>
 struct expected_monad_constraint {
-    using type = ::std::enable_if_t<::std::is_constructible<T1, T2>::value, bool>;
+    using type = ::std::enable_if_t<::std::is_void<T1>::value || ::std::is_constructible<T1, T2>::value, bool>;
 };
 template<typename F, typename T1, typename T2>
 using expected_monad_constraint_t = typename expected_monad_constraint<F, T1, T2>::type;
 
-// === expected_toplevel_base
 template<typename T, typename E>
 using expected_def_ctor_base = expected_def_ctor_base_impl<::std::is_void<T>::value || ::std::is_default_constructible<T>::value, T, E>;
 
+// === swappable_base
 template<typename T, typename E>
-struct expected_toplevel_base : expected_def_ctor_base<T, E> {
+constexpr bool expected_swappable_v =
+    (::std::is_void<T>::value || is_swappable_v<T>) && is_swappable_v<E> &&
+    (::std::is_void<T>::value || ::std::is_move_constructible<T>::value) && ::std::is_move_constructible<E>::value &&
+    (::std::is_void<T>::value || ::std::is_nothrow_move_constructible<T>::value || ::std::is_nothrow_move_constructible<E>::value);
+
+template<typename T, typename E>
+constexpr bool expected_swap_noexcept_v =
+    (::std::is_void<T>::value || (::std::is_nothrow_move_constructible<T>::value && is_nothrow_swappable_v<T>)) &&
+    ::std::is_nothrow_move_constructible<E>::value && is_nothrow_swappable_v<E>;
+
+template<bool Trivial, typename T, typename E>
+IDYM_INTERNAL_CXX20_CONSTEXPR_TRYCATCH void swap_expected(::std::true_type, expected_base_impl<Trivial, T, E>& this_ref, expected_base_impl<Trivial, T, E>& rhs) {
+    using TT = expected_value_member_t<T>;
+    E tmp(::std::move(rhs._unex));
+    rhs._unex.~E();
+
+    try {
+        ::new (::std::addressof(rhs._val)) expected_value_member_t<T>(::std::move(this_ref._val));
+        this_ref._val.~TT();
+        ::new (::std::addressof(this_ref._unex)) E(::std::move(tmp));
+    } catch (...) {
+        ::new (::std::addressof(rhs._unex)) E(::std::move(tmp));
+        throw;
+    }
+}
+template<bool Trivial, typename T, typename E>
+IDYM_INTERNAL_CXX20_CONSTEXPR_TRYCATCH void swap_expected(::std::false_type, expected_base_impl<Trivial, T, E>& this_ref, expected_base_impl<Trivial, T, E>& rhs) {
+    using TT = expected_value_member_t<T>;
+    expected_value_member_t<T> tmp(::std::move(this_ref._val));
+    this_ref._val.~TT();
+
+    try {
+        ::new (::std::addressof(this_ref._unex)) E(::std::move(rhs._unex));
+        rhs._unex.~E();
+        ::new (::std::addressof(rhs._val)) expected_value_member_t<T>(::std::move(tmp));
+    } catch (...) {
+        ::new (::std::addressof(this_ref._val)) expected_value_member_t<T>(::std::move(tmp));
+        throw;
+    }
+}
+
+template<bool, typename T, typename E>
+struct swappable_base_impl : expected_def_ctor_base<T, E> {};
+
+template<typename T, typename E>
+struct swappable_base_impl<true, T, E> : expected_def_ctor_base<T, E> {
+    using expected_def_ctor_base<T, E>::expected_def_ctor_base;
+
+    constexpr void swap(expected<T, E>& rhs) noexcept(expected_swap_noexcept_v<T, E>) {
+        auto& this_expected = static_cast<expected<T, E>&>(*this);
+
+        if (rhs._has_val && this_expected._has_val) {
+            using ::std::swap;
+            swap(this_expected._val, rhs._val);
+            return;
+        }
+        if (rhs._has_val && !this_expected._has_val) {
+            rhs.swap(this_expected);
+            return;
+        }
+        if (!rhs._has_val && !this_expected._has_val) {
+            using ::std::swap;
+            swap(this_expected._unex, rhs._unex);
+            return;
+        }
+
+        swap_expected(::std::integral_constant<bool, ::std::is_nothrow_move_constructible<E>::value>{}, this_expected, rhs);
+        this_expected._has_val = false;
+        rhs._has_val = true;
+    }
+
+    friend constexpr void swap(expected<T, E>& x, expected<T, E>& y) noexcept(expected_swap_noexcept_v<T, E>) {
+        x.swap(y);
+    }
+};
+
+template<typename T, typename E>
+using swappable_base = swappable_base_impl<expected_swappable_v<T, E>, T, E>;
+
+// === monadic void compat invokers and ctors
+template<typename Ret_T, typename Value_T>
+constexpr auto make_monad_value_ret(::std::true_type, Value_T&&) {
+    return Ret_T();
+}
+template<typename Ret_T, typename Value_T>
+constexpr auto make_monad_value_ret(::std::false_type, Value_T&& value) {
+    return Ret_T(in_place, ::std::forward<Value_T>(value));
+}
+
+template<typename F, typename Value_T>
+constexpr auto make_monad_invoke_ret(::std::true_type, F&& f, Value_T&) {
+    return invoke(::std::forward<F>(f));
+}
+template<typename F, typename Value_T>
+constexpr auto make_monad_invoke_ret(::std::false_type, F&& f, Value_T&& value) {
+    return invoke(::std::forward<F>(f), ::std::forward<Value_T>(value));
+}
+
+template<typename F, typename T, typename = void>
+struct expected_invoke_result {
+    using type = remove_cvref_t<invoke_result_t<F, T>>;
+};
+template<typename F, typename T>
+struct expected_invoke_result<F, T, ::std::enable_if_t<::std::is_same<remove_cvref_t<T>, empty_union>::value>> {
+    using type = remove_cvref_t<invoke_result_t<F>>;
+};
+
+template<typename F, typename T>
+using expected_invoke_result_t = typename expected_invoke_result<F, T>::type;
+
+// === expected_toplevel_base
+template<typename T, typename E>
+struct expected_toplevel_base : swappable_base<T, E> {
 private:
     // compat unexpected ctors traits
     template<typename U, typename G>
@@ -428,10 +553,18 @@ private:
         !::std::is_constructible<unexpected<E>, const expected<U, G>>::value;
 
 public:
-    using expected_def_ctor_base<T, E>::expected_def_ctor_base;
+    using swappable_base<T, E>::swappable_base;
+    
+    using value_type = T;
+    using error_type = E;
+    using unexpected_type = unexpected<E>;
+    
+    template<class U>
+    using rebind = expected<U, error_type>;
 
     constexpr expected_toplevel_base() noexcept(::std::is_void<T>::value) = default;
 
+    // === ctors
     template<
         typename U, typename G,
         ::std::enable_if_t<compat_expected_explicit_v<U, G> && compat_expected_constraint_v<U, G>, bool> = true
@@ -463,6 +596,38 @@ public:
     constexpr expected_toplevel_base(expected<U, G>&& other) : expected_toplevel_base{dummy_t{}} {
         forward_construct_compat_expected(::std::move(other));
     }
+    
+    template<
+        typename G,
+        ::std::enable_if_t<!::std::is_convertible<const G&, E>::value && ::std::is_constructible<E, const G&>::value, bool> = true
+    >
+    constexpr explicit expected_toplevel_base(const unexpected<G>& e) : expected_toplevel_base{dummy_t{}} {
+        this->forward_construct_e(e.error());
+    }
+
+    template<
+        typename G,
+        ::std::enable_if_t<::std::is_convertible<const G&, E>::value && ::std::is_constructible<E, const G&>::value, bool> = true
+    >
+    constexpr expected_toplevel_base(const unexpected<G>& e) : expected_toplevel_base{dummy_t{}} {
+        this->forward_construct_e(e.error());
+    }
+
+    template<
+        typename G,
+        ::std::enable_if_t<!::std::is_convertible<G, E>::value && ::std::is_constructible<E, G>::value, bool> = true
+    >
+    constexpr explicit expected_toplevel_base(unexpected<G>&& e) : expected_toplevel_base{dummy_t{}} {
+        this->forward_construct_e(::std::move(e.error()));
+    }
+
+    template<
+        typename G,
+        ::std::enable_if_t<::std::is_convertible<G, E>::value && ::std::is_constructible<E, G>::value, bool> = true
+    >
+    constexpr expected_toplevel_base(unexpected<G>&& e) : expected_toplevel_base{dummy_t{}} {
+        this->forward_construct_e(::std::move(e.error()));
+    }
 
     template<
         typename... Args,
@@ -479,10 +644,181 @@ public:
     constexpr explicit expected_toplevel_base(unexpect_t, ::std::initializer_list<U> il, Args&&... args) : expected_toplevel_base{dummy_t{}} {
         forward_construct_e(il, ::std::forward<Args>(args)...);
     }
+    
+    // === observers
+    constexpr explicit operator bool() const noexcept {
+        return this->_has_val;
+    }
+    constexpr bool has_value() const noexcept {
+        return this->_has_val;
+    }
+
+    constexpr const E& error() const & noexcept {
+        return this->_unex;
+    }
+    constexpr E& error() & noexcept {
+        return this->_unex;
+    }
+
+    constexpr E&& error() && noexcept {
+        return ::std::move(this->_unex);
+    }
+    constexpr const E&& error() const && noexcept {
+        return ::std::move(this->_unex);
+    }
+
+    template<typename G = E>
+    constexpr E error_or(G&& e) const & {
+        if (this->_has_val)
+            return ::std::forward<G>(e);
+        return this->error();
+    }
+    template<typename G = E>
+    constexpr E error_or(G&& e) && {
+        if (this->_has_val)
+            return ::std::forward<G>(e);
+        return ::std::move(this->error());
+    }
+    
+    // === monads
+    template<typename F, _internal::expected_monad_constraint_t<F, E, E&> = true>
+    constexpr auto and_then(F&& f) & {
+        if (this->_has_val)
+            return make_monad_invoke_ret(::std::is_void<T>{}, ::std::forward<F>(f), this->_val);
+        return expected_invoke_result_t<F, decltype(this->_val)>(unexpect, this->error());
+    }
+    template<typename F, _internal::expected_monad_constraint_t<F, E, const E&> = true>
+    constexpr auto and_then(F&& f) const & {
+        if (this->_has_val)
+            return inmake_monad_invoke_retvoke(::std::is_void<T>{}, ::std::forward<F>(f), this->_val);
+        return expected_invoke_result_t<F, decltype(this->_val)>(unexpect, this->error());
+    }
+
+    template<typename F, _internal::expected_monad_constraint_t<F, E, E&&> = true>
+    constexpr auto and_then(F&& f) && {
+        if (this->_has_val)
+            return make_monad_invoke_ret(::std::is_void<T>{}, ::std::forward<F>(f), ::std::move(this->_val));
+        return expected_invoke_result_t<F, decltype(::std::move(this->_val))>(unexpect, ::std::move(this->error()));
+    }
+    template<typename F, _internal::expected_monad_constraint_t<F, E, const E&&> = true>
+    constexpr auto and_then(F&& f) const && {
+        if (this->_has_val)
+            return make_monad_invoke_ret(::std::is_void<T>{}, ::std::forward<F>(f), ::std::move(this->_val));
+        return expected_invoke_result_t<F, decltype(::std::move(this->_val))>(unexpect, ::std::move(this->error()));
+    }
+
+    template<typename F, _internal::expected_monad_constraint_t<F, T, ::std::add_lvalue_reference_t<T>> = true>
+    constexpr auto or_else(F&& f) & {
+        if (this->_has_val)
+            return make_monad_value_ret<remove_cvref_t<invoke_result_t<F, decltype(this->error())>>>(::std::is_void<T>{}, this->_val);
+        return invoke(::std::forward<F>(f), this->_unex);
+    }
+    template<typename F, _internal::expected_monad_constraint_t<F, T, ::std::add_lvalue_reference_t<const T>> = true>
+    constexpr auto or_else(F&& f) const & {
+        if (this->_has_val)
+            return make_monad_value_ret<remove_cvref_t<invoke_result_t<F, decltype(this->error())>>>(::std::is_void<T>{}, this->_val);
+        return invoke(::std::forward<F>(f), this->_unex);
+    }
+
+    template<typename F, _internal::expected_monad_constraint_t<F, T, ::std::add_rvalue_reference_t<T>> = true>
+    constexpr auto or_else(F&& f) && {
+        if (this->_has_val)
+            return make_monad_value_ret<remove_cvref_t<invoke_result_t<F, decltype(::std::move(this->error()))>>>(::std::is_void<T>{}, ::std::move(this->_val));
+        return invoke(::std::forward<F>(f), ::std::move(this->_unex));
+    }
+    template<typename F, _internal::expected_monad_constraint_t<F, T, ::std::add_rvalue_reference_t<const T>> = true>
+    constexpr auto or_else(F&& f) const && {
+        if (this->_has_val)
+            return make_monad_value_ret<remove_cvref_t<invoke_result_t<F, decltype(::std::move(this->error()))>>>(::std::is_void<T>{}, ::std::move(this->_val));
+        return invoke(::std::forward<F>(f), ::std::move(this->_unex));
+    }
+
+    template<typename F, _internal::expected_monad_constraint_t<F, E, E&> = true>
+    constexpr auto transform(F&& f) & {
+        return transform_impl(*this, ::std::forward<F>(f));
+    }
+    template<typename F, _internal::expected_monad_constraint_t<F, E, const E&> = true>
+    constexpr auto transform(F&& f) const & {
+        return transform_impl(*this, ::std::forward<F>(f));
+    }
+
+    template<typename F, _internal::expected_monad_constraint_t<F, E, E&&> = true>
+    constexpr auto transform(F&& f) && {
+        return transform_impl(::std::move(*this), ::std::forward<F>(f));
+    }
+    template<typename F, _internal::expected_monad_constraint_t<F, E, const E&&> = true>
+    constexpr auto transform(F&& f) const && {
+        return transform_impl(::std::move(*this), ::std::forward<F>(f));
+    }
+    
+    template<typename F, _internal::expected_monad_constraint_t<F, T, ::std::add_lvalue_reference_t<T>> = true>
+    constexpr auto transform_error(F&& f) & {
+        return transform_error_impl(*this, ::std::forward<F>(f));
+    }
+    template<typename F, _internal::expected_monad_constraint_t<F, T, ::std::add_lvalue_reference_t<const T>> = true>
+    constexpr auto transform_error(F&& f) const & {
+        return transform_error_impl(*this, ::std::forward<F>(f));
+    }
+
+    template<typename F, _internal::expected_monad_constraint_t<F, T, ::std::add_rvalue_reference_t<T>> = true>
+    constexpr auto transform_error(F&& f) && {
+        return transform_error_impl(::std::move(*this), ::std::forward<F>(f));
+    }
+    template<typename F, _internal::expected_monad_constraint_t<F, T, ::std::add_rvalue_reference_t<const T>> = true>
+    constexpr auto transform_error(F&& f) const && {
+        return transform_error_impl(::std::move(*this), ::std::forward<F>(f));
+    }
+    
+    // === comparators
+    template<
+        typename T2, typename E2,
+        ::std::enable_if_t<
+            ((::std::is_void<T>::value && ::std::is_void<T2>::value) || _internal::expected_eq_test_v<::std::add_lvalue_reference_t<const T>, const T2>) &&
+            _internal::expected_eq_test_v<const E&, const E2&>,
+        bool> = true
+    >
+    friend constexpr bool operator==(const expected<T, E>& x, const expected<T2, E2>& y) {
+        if (x.has_value() != y.has_value())
+            return false;
+        return x.has_value() ? compare_expected_values(::std::is_void<T>{}, x, y) : static_cast<bool>(x.error() == y.error());
+    }
+    
+    template<typename E2, ::std::enable_if_t<_internal::expected_eq_test<const E&, const E2&>::value, bool> = true>
+    friend constexpr bool operator==(const expected<T, E>& x, const unexpected<E2>& e) {
+        return !x.has_value() && static_cast<bool>(x.error() == e.error());
+    }
+    
+#if __cpp_impl_three_way_comparison < 201907L
+    // suppliment for synthesized ops
+    template<
+        typename T2, typename E2,
+        ::std::enable_if_t<
+            ((::std::is_void<T>::value && ::std::is_void<T2>::value) || _internal::expected_eq_test_v<::std::add_lvalue_reference_t<const T>, const T2>) &&
+            _internal::expected_eq_test_v<const E&, const E2&>,
+        bool> = true
+    >
+    friend constexpr bool operator!=(const expected<T, E>& x, const expected<T2, E2>& y) {
+        return !(x == y);
+    }
+
+    template<typename E2, ::std::enable_if_t<_internal::expected_eq_test_v<const E&, const E2&>, bool> = true>
+    friend constexpr bool operator!=(const expected<T, E>& x, const unexpected<E2>& e) {
+        return !(x == e);
+    }
+    template<typename E2, ::std::enable_if_t<_internal::expected_eq_test_v<const E&, const E2&>, bool> = true>
+    friend constexpr bool operator!=(const unexpected<E2>& e, const expected<T, E>& x) {
+        return x != e;
+    }
+    template<typename E2, ::std::enable_if_t<_internal::expected_eq_test_v<const E&, const E2&>, bool> = true>
+    friend constexpr bool operator==(const unexpected<E2>& e, const expected<T, E>& x) {
+        return x == e;
+    }
+#endif
 
 protected:
-    constexpr expected_toplevel_base(dummy_t) : expected_def_ctor_base<T, E>{dummy_t{}} {}
+    constexpr expected_toplevel_base(dummy_t) : swappable_base<T, E>{dummy_t{}} {}
 
+private:
     template<typename... Us>
     constexpr void forward_construct_e(Us&&... us) {
         ::new (::std::addressof(this->_unex)) E(::std::forward<Us>(us)...);
@@ -506,134 +842,40 @@ protected:
             ::new (::std::addressof(this->_unex)) E(::std::forward<Expected_T>(other).error());
         this->_has_val = other.has_value();
     }
-};
 
-// === expected_common_interface
-template<typename T, typename E, typename Expected_T>
-struct expected_common_interface {
-    constexpr explicit operator bool() const noexcept {
-        return thisref()._has_val;
+    template<typename U, typename This_T, typename F>
+    static constexpr auto transform_impl(::std::true_type, This_T&& this_ref, F&& f) {
+        make_monad_invoke_ret(::std::is_void<T>{}, ::std::forward<F>(f), ::std::forward<This_T>(this_ref)._val);
+        return expected<U, E>();
     }
-    constexpr bool has_value() const noexcept {
-        return thisref()._has_val;
+    template<typename U, typename This_T, typename F>
+    static constexpr auto transform_impl(::std::false_type, This_T&& this_ref, F&& f) {
+        return expected<U, E>(in_place, make_monad_invoke_ret(::std::is_void<T>{}, ::std::forward<F>(f), ::std::forward<This_T>(this_ref)._val));
     }
-
-    constexpr const E& error() const & noexcept {
-        return thisref()._unex;
+    template<typename This_T, typename F>
+    static constexpr auto transform_impl(This_T&& this_ref, F&& f) {
+        using U = expected_invoke_result_t<F, decltype(::std::forward<This_T>(this_ref)._val)>;
+    
+        if (!this_ref._has_val)
+            return expected<U, E>(unexpect, ::std::forward<This_T>(this_ref).error());
+        return transform_impl<U>(::std::integral_constant<bool, ::std::is_void<U>::value>{}, ::std::forward<This_T>(this_ref), ::std::forward<F>(f));
     }
-    constexpr E& error() & noexcept {
-        return thisref()._unex;
-    }
-
-    constexpr E&& error() && noexcept {
-        return ::std::move(thisref()._unex);
-    }
-    constexpr const E&& error() const && noexcept {
-        return ::std::move(thisref()._unex);
-    }
-
-private:
-    Expected_T& thisref() & noexcept {
-        return static_cast<Expected_T&>(*this);
-    }
-    const Expected_T& thisref() const & noexcept {
-        return static_cast<const Expected_T&>(*this);
-    }
-    Expected_T&& thisref() && noexcept {
-        return static_cast<Expected_T&&>(*this);
-    }
-    const Expected_T&& thisref() const && noexcept {
-        return static_cast<const Expected_T&&>(*this);
+    
+    template<typename This_T, typename F>
+    static constexpr auto transform_error_impl(This_T&& this_ref, F&& f) {
+        using G = ::std::remove_cv_t<invoke_result_t<F, decltype(::std::forward<This_T>(this_ref).error())>>;
+    
+        if (this_ref._has_val)
+            return make_monad_value_ret<expected<T, G>>(::std::is_void<T>{}, ::std::forward<This_T>(this_ref)._val);
+        return expected<T, G>(unexpect, invoke(::std::forward<F>(f), ::std::forward<This_T>(this_ref).error()));
     }
 };
-
-// === swappable_base
-template<typename T, typename E>
-constexpr bool expected_swappable_v =
-    (::std::is_void<T>::value || is_swappable_v<T>) && is_swappable_v<E> &&
-    (::std::is_void<T>::value || ::std::is_move_constructible<T>::value) && ::std::is_move_constructible<E>::value &&
-    (::std::is_void<T>::value || ::std::is_nothrow_move_constructible<T>::value || ::std::is_nothrow_move_constructible<E>::value);
-
-template<typename T, typename E>
-constexpr bool expected_swap_noexcept_v =
-    (::std::is_void<T>::value || ::std::is_nothrow_move_constructible<T>::value) && is_nothrow_swappable_v<T> &&
-    ::std::is_nothrow_move_constructible<E>::value && is_nothrow_swappable_v<E>;
-
-template<typename T, typename E>
-IDYM_INTERNAL_CXX20_CONSTEXPR_TRYCATCH void swap_expected(::std::true_type, expected_toplevel_base<T, E>& this_ref, expected_toplevel_base<T, E>& rhs) {
-    using TT = expected_value_member_t<T>;
-    E tmp(::std::move(rhs._unex));
-    rhs._unex.~E();
-
-    try {
-        ::new (::std::addressof(rhs._val)) expected_value_member_t<T>(::std::move(this_ref._val));
-        this_ref._val.~TT();
-        ::new (::std::addressof(this_ref._unex)) E(::std::move(tmp));
-    } catch (...) {
-        ::new (::std::addressof(rhs._unex)) E(::std::move(tmp));
-        throw;
-    }
-}
-template<typename T, typename E>
-IDYM_INTERNAL_CXX20_CONSTEXPR_TRYCATCH void swap_expected(::std::false_type, expected_toplevel_base<T, E>& this_ref, expected_toplevel_base<T, E>& rhs) {
-    using TT = expected_value_member_t<T>;
-    expected_value_member_t<T> tmp(::std::move(this_ref._val));
-    this_ref._val.~TT();
-
-    try {
-        ::new (::std::addressof(this_ref._unex)) E(::std::move(rhs._unex));
-        rhs._unex.~E();
-        ::new (::std::addressof(rhs._val)) expected_value_member_t<T>(::std::move(tmp));
-    } catch (...) {
-        ::new (::std::addressof(this_ref._val)) expected_value_member_t<T>(::std::move(tmp));
-        throw;
-    }
-}
-
-template<bool, typename, typename, typename>
-struct swappable_base_impl;
-
-template<typename T, typename E, typename Expected_T>
-struct swappable_base_impl<true, T, E, Expected_T> {
-    constexpr void swap(Expected_T& rhs) noexcept(expected_swap_noexcept_v<T, E>) {
-        auto& this_expected = static_cast<Expected_T&>(*this);
-
-        if (rhs._has_val && this_expected._has_val) {
-            using ::std::swap;
-            swap(this_expected._val, rhs._val);
-            return;
-        }
-        if (rhs._has_val && !this_expected._has_val) {
-            rhs.swap(this_expected);
-            return;
-        }
-        if (!rhs._has_val && !this_expected._has_val) {
-            using ::std::swap;
-            swap(this_expected._unex, rhs._unex);
-            return;
-        }
-
-        swap_expected(::std::integral_constant<bool, ::std::is_nothrow_move_constructible<E>::value>{}, this_expected, rhs);
-        this_expected._has_val = false;
-        rhs._has_val = true;
-    }
-
-    friend constexpr void swap(Expected_T& x, Expected_T& y) noexcept(expected_swap_noexcept_v<T, E>) {
-        x.swap(y);
-    }
-};
-
-template<typename T, typename E, typename Expected_T>
-struct swappable_base_impl<false, T, E, Expected_T> {};
-
-template<typename T, typename E, typename Expected_T>
-using swappable_base = swappable_base_impl<expected_swappable_v<T, E>, T, E, Expected_T>;
 
 } // <<< internal
 
 // === expected
 template<typename T, typename E>
-class expected : _internal::expected_toplevel_base<T, E>, public _internal::expected_common_interface<T, E, expected<T, E>>, public _internal::swappable_base<T, E, expected<T, E>> {
+class expected : public _internal::expected_toplevel_base<T, E> {
     // compat unexpected ctors traits
     template<typename U, typename G>
     static constexpr auto compat_expected_explicit_v = (!::std::is_void<T>::value && !::std::is_convertible<const U&, T>::value) || !::std::is_convertible<const G&, E>::value;
@@ -669,10 +911,6 @@ class expected : _internal::expected_toplevel_base<T, E>, public _internal::expe
         (::std::is_nothrow_constructible<E, GF>::value || ::std::is_nothrow_move_constructible<T>::value || ::std::is_nothrow_move_constructible<E>::value);
 
 public:
-    using value_type = T;
-    using error_type = E;
-    using unexpected_type = unexpected<E>;
-
     // === ctors
     constexpr expected() = default;
 
@@ -691,38 +929,6 @@ public:
     >
     constexpr expected(U&& v) : expected{_internal::dummy_t{}} {
         forward_construct_t(std::forward<U>(v));
-    }
-
-    template<
-        typename G,
-        ::std::enable_if_t<!::std::is_convertible<const G&, E>::value && ::std::is_constructible<E, const G&>::value, bool> = true
-    >
-    constexpr explicit expected(const unexpected<G>& e) : expected{_internal::dummy_t{}} {
-        this->forward_construct_e(e.error());
-    }
-
-    template<
-        typename G,
-        ::std::enable_if_t<::std::is_convertible<const G&, E>::value && ::std::is_constructible<E, const G&>::value, bool> = true
-    >
-    constexpr expected(const unexpected<G>& e) : expected{_internal::dummy_t{}} {
-        this->forward_construct_e(e.error());
-    }
-
-    template<
-        typename G,
-        ::std::enable_if_t<!::std::is_convertible<G, E>::value && ::std::is_constructible<E, G>::value, bool> = true
-    >
-    constexpr explicit expected(unexpected<G>&& e) : expected{_internal::dummy_t{}} {
-        this->forward_construct_e(::std::move(e.error()));
-    }
-
-    template<
-        typename G,
-        ::std::enable_if_t<::std::is_convertible<G, E>::value && ::std::is_constructible<E, G>::value, bool> = true
-    >
-    constexpr expected(unexpected<G>&& e) : expected{_internal::dummy_t{}} {
-        this->forward_construct_e(::std::move(e.error()));
     }
 
     template<
@@ -835,183 +1041,42 @@ public:
     constexpr T value_or(U&& v)  && {
         return this->_has_val ? ::std::move(**this) : static_cast<T>(::std::forward<U>(v));
     }
-
-    template<typename G = E>
-    constexpr E error_or(G&& e) const & {
-        if (this->_has_val)
-            return ::std::forward<G>(e);
-        return this->error();
-    }
-    template<typename G = E>
-    constexpr E error_or(G&& e) && {
-        if (this->_has_val)
-            return ::std::forward<G>(e);
-        return ::std::move(this->error());
-    }
-
-    // === monads
-    template<typename F, _internal::expected_monad_constraint_t<F, E, E&> = true>
-    constexpr auto and_then(F&& f) & {
-        if (this->_has_val)
-            return invoke(::std::forward<F>(f), this->_val);
-        return remove_cvref_t<invoke_result_t<F, decltype((this->_val))>>(unexpect, this->error());
-    }
-    template<typename F, _internal::expected_monad_constraint_t<F, E, const E&> = true>
-    constexpr auto and_then(F&& f) const & {
-        if (this->_has_val)
-            return invoke(::std::forward<F>(f), this->_val);
-        return remove_cvref_t<invoke_result_t<F, decltype((this->_val))>>(unexpect, this->error());
-    }
-
-    template<typename F, _internal::expected_monad_constraint_t<F, E, E&&> = true>
-    constexpr auto and_then(F&& f) && {
-        if (this->_has_val)
-            return invoke(::std::forward<F>(f), ::std::move(this->_val));
-        return remove_cvref_t<invoke_result_t<F, decltype(::std::move(this->_val))>>(unexpect, ::std::move(this->error()));
-    }
-    template<typename F, _internal::expected_monad_constraint_t<F, E, const E&&> = true>
-    constexpr auto and_then(F&& f) const && {
-        if (this->_has_val)
-            return invoke(::std::forward<F>(f), ::std::move(this->_val));
-        return remove_cvref_t<invoke_result_t<F, decltype(::std::move(this->_val))>>(unexpect, ::std::move(this->error()));
-    }
-
-    template<typename F, _internal::expected_monad_constraint_t<F, T, T&> = true>
-    constexpr auto or_else(F&& f) & {
-        if (this->_has_val)
-            return remove_cvref_t<invoke_result_t<F, decltype(this->error())>>(in_place, this->_val);
-        return invoke(::std::forward<F>(f), this->_unex);
-    }
-    template<typename F, _internal::expected_monad_constraint_t<F, T, const T&> = true>
-    constexpr auto or_else(F&& f) const & {
-        if (this->_has_val)
-            return remove_cvref_t<invoke_result_t<F, decltype(this->error())>>(in_place, this->_val);
-        return invoke(::std::forward<F>(f), this->_unex);
-    }
-
-    template<typename F, _internal::expected_monad_constraint_t<F, T, T&&> = true>
-    constexpr auto or_else(F&& f) && {
-        if (this->_has_val)
-            return remove_cvref_t<invoke_result_t<F, decltype(::std::move(this->error()))>>(in_place, ::std::move(this->_val));
-        return invoke(::std::forward<F>(f), ::std::move(this->_unex));
-    }
-    template<typename F, _internal::expected_monad_constraint_t<F, T, const T&&> = true>
-    constexpr auto or_else(F&& f) const && {
-        if (this->_has_val)
-            return remove_cvref_t<invoke_result_t<F, decltype(::std::move(this->error()))>>(in_place, ::std::move(this->_val));
-        return invoke(::std::forward<F>(f), ::std::move(this->_unex));
-    }
-    
-    template<typename F, _internal::expected_monad_constraint_t<F, E, E&> = true>
-    constexpr auto transform(F&& f) & {
-        return transform_impl(*this, ::std::forward<F>(f));
-    }
-    template<typename F, _internal::expected_monad_constraint_t<F, E, const E&> = true>
-    constexpr auto transform(F&& f) const & {
-        return transform_impl(*this, ::std::forward<F>(f));
-    }
-
-    template<typename F, _internal::expected_monad_constraint_t<F, E, E&&> = true>
-    constexpr auto transform(F&& f) && {
-        return transform_impl(::std::move(*this), ::std::forward<F>(f));
-    }
-    template<typename F, _internal::expected_monad_constraint_t<F, E, const E&&> = true>
-    constexpr auto transform(F&& f) const && {
-        return transform_impl(::std::move(*this), ::std::forward<F>(f));
-    }
-
-    template<typename F, _internal::expected_monad_constraint_t<F, T, T&> = true>
-    constexpr auto transform_error(F&& f) & {
-        return transform_error_impl(*this, ::std::forward<F>(f));
-    }
-    template<typename F, _internal::expected_monad_constraint_t<F, T, const T&> = true>
-    constexpr auto transform_error(F&& f) const & {
-        return transform_error_impl(*this, ::std::forward<F>(f));
-    }
-
-    template<typename F, _internal::expected_monad_constraint_t<F, T, T&&> = true>
-    constexpr auto transform_error(F&& f) && {
-        return transform_error_impl(::std::move(*this), ::std::forward<F>(f));
-    }
-    template<typename F, _internal::expected_monad_constraint_t<F, T, const T&&> = true>
-    constexpr auto transform_error(F&& f) const && {
-        return transform_error_impl(::std::move(*this), ::std::forward<F>(f));
-    }
     
     // === comparators
     template<
-        typename T2, typename E2,
-        ::std::enable_if_t<conjunction_v<_internal::expected_eq_test<const T&, const T2>, _internal::expected_eq_test<const E&, const E2&>>, bool> = true
-    >
-    friend constexpr bool operator==(const expected& x, const expected<T2, E2>& y) {
-        if (x.has_value() != y.has_value())
-            return false;
-        return x.has_value() ? (*x == *y) : (x.error() == y.error());
-    }
-    
-    template<
         typename T2,
-        ::std::enable_if_t<!_internal::is_specialization_of_v<T2, expected> && _internal::expected_eq_test<const T&, const T2&>::value, bool> = true
+        ::std::enable_if_t<!_internal::is_specialization_of_v<T2, expected> && _internal::expected_eq_test_v<const T&, const T2&>, bool> = true
     >
     friend constexpr bool operator==(const expected& x, const T2& v) {
         return x.has_value() && static_cast<bool>(*x == v);
-    }
-    
-    template<typename E2, ::std::enable_if_t<_internal::expected_eq_test<const E&, const E2&>::value, bool> = true>
-    friend constexpr bool operator==(const expected& x, const unexpected<E2>& e) {
-        return !x.has_value() && static_cast<bool>(x.error() == e.error());
     }
 
 #if __cpp_impl_three_way_comparison < 201907L
     // suppliment for synthesized ops
     template<
-        typename T2, typename E2,
-        ::std::enable_if_t<conjunction_v<_internal::expected_eq_test<const T&, const T2>, _internal::expected_eq_test<const E&, const E2&>>, bool> = true
-    >
-    friend constexpr bool operator!=(const expected& x, const expected<T2, E2>& y) {
-        return !(x == y);
-    }
-
-    template<
         typename T2,
-        ::std::enable_if_t<!_internal::is_specialization_of_v<T2, expected> && _internal::expected_eq_test<const T&, const T2&>::value, bool> = true
+        ::std::enable_if_t<!_internal::is_specialization_of_v<T2, expected> && _internal::expected_eq_test_v<const T&, const T2&>, bool> = true
     >
     friend constexpr bool operator!=(const expected& x, const T2& v) {
         return !(x == v);
     }
     template<
         typename T2,
-        ::std::enable_if_t<!_internal::is_specialization_of_v<T2, expected> && _internal::expected_eq_test<const T&, const T2&>::value, bool> = true
+        ::std::enable_if_t<!_internal::is_specialization_of_v<T2, expected> && _internal::expected_eq_test_v<const T&, const T2&>, bool> = true
         >
     friend constexpr bool operator!=(const T2& v, const expected& x) {
         return x != v;
     }
     template<
         typename T2,
-        ::std::enable_if_t<!_internal::is_specialization_of_v<T2, expected> && _internal::expected_eq_test<const T&, const T2&>::value, bool> = true
+        ::std::enable_if_t<!_internal::is_specialization_of_v<T2, expected> && _internal::expected_eq_test_v<const T&, const T2&>, bool> = true
     >
     friend constexpr bool operator==(const T2& v, const expected& x) {
         return x == v;
     }
-
-    template<typename E2, ::std::enable_if_t<_internal::expected_eq_test<const E&, const E2&>::value, bool> = true>
-    friend constexpr bool operator!=(const expected& x, const unexpected<E2>& e) {
-        return !(x == e);
-    }
-    template<typename E2, ::std::enable_if_t<_internal::expected_eq_test<const E&, const E2&>::value, bool> = true>
-    friend constexpr bool operator!=(const unexpected<E2>& e, const expected& x) {
-        return x != e;
-    }
-    template<typename E2, ::std::enable_if_t<_internal::expected_eq_test<const E&, const E2&>::value, bool> = true>
-    friend constexpr bool operator==(const unexpected<E2>& e, const expected& x) {
-        return x == e;
-    }
 #endif
 
 private:
-    friend _internal::swappable_base<T, E, expected>;
-    friend _internal::expected_common_interface<T, E, expected>;
-
     constexpr expected(_internal::dummy_t) : _internal::expected_toplevel_base<T, E>{_internal::dummy_t{}} {}
 
     template<typename... Us>
@@ -1043,53 +1108,30 @@ private:
         ::new (::std::addressof(this->_val)) T(::std::forward<Ts>(args)...);
         return this->_val;
     }
-    
-    template<typename U, typename This_T, typename F>
-    static constexpr auto transform_impl(::std::true_type, This_T&& this_ref, F&& f) {
-        invoke(::std::forward<F>(f), *::std::forward<This_T>(this_ref));
-        return expected<U, E>();
-    }
-    template<typename U, typename This_T, typename F>
-    static constexpr auto transform_impl(::std::false_type, This_T&& this_ref, F&& f) {
-        return expected<U, E>(in_place, invoke(::std::forward<F>(f), *::std::forward<This_T>(this_ref)));
-    }
-    template<typename This_T, typename F>
-    static constexpr auto transform_impl(This_T&& this_ref, F&& f) {
-        using U = ::std::remove_cv_t<invoke_result_t<F, decltype(*::std::forward<This_T>(this_ref))>>;
-    
-        if (!this_ref._has_val)
-            return expected<U, E>(unexpect, ::std::forward<This_T>(this_ref).error());
-        return transform_impl<U>(::std::integral_constant<bool, ::std::is_void<U>::value>{}, ::std::forward<This_T>(this_ref), ::std::forward<F>(f));
-    }
-
-    template<typename This_T, typename F>
-    static constexpr auto transform_error_impl(This_T&& this_ref, F&& f) {
-        using G = ::std::remove_cv_t<invoke_result_t<F, decltype(::std::forward<This_T>(this_ref).error())>>;
-    
-        if (this_ref._has_val)
-            return expected<T, G>(in_place, *::std::forward<This_T>(this_ref));
-        return expected<T, G>(unexpect, invoke(::std::forward<F>(f), ::std::forward<This_T>(this_ref).error()));
-    }
 };
 
 namespace _internal { // >>> internal
 
-template<typename E, typename T, typename Expected_T>
-struct expected_common_void_interface {
+template<typename T, typename E>
+struct expected_void_toplevel_base : expected_toplevel_base<T, E> {
+    using expected_toplevel_base<T, E>::expected_toplevel_base;
+    
+    constexpr void emplace() noexcept {
+        if (!this->_has_val) {
+            this->_unex.~E();
+            this->_has_val = true;
+        }
+    }
+    
+    constexpr void operator*() const noexcept {}
 
-
-private:
-    Expected_T& thisref() & noexcept {
-        return static_cast<Expected_T&>(*this);
+    constexpr void value() const & {
+        if (!this->_has_val)
+            throw bad_expected_access<E>(this->_unex);
     }
-    const Expected_T& thisref() const & noexcept {
-        return static_cast<const Expected_T&>(*this);
-    }
-    Expected_T&& thisref() && noexcept {
-        return static_cast<Expected_T&&>(*this);
-    }
-    const Expected_T&& thisref() const && noexcept {
-        return static_cast<const Expected_T&&>(*this);
+    constexpr void value() && {
+        if (!this->_has_val)
+            throw bad_expected_access<E>(::std::move(this->_unex));
     }
 };
 
@@ -1097,52 +1139,24 @@ private:
 
 // === expected<cv void, E>
 template<typename E>
-class expected<void, E> :
-    _internal::expected_toplevel_base<void, E>,
-    public _internal::expected_common_interface<void, E, expected<void, E>>,
-    public _internal::swappable_base<void, E, expected<void, E>>
-{
+class expected<void, E> : public _internal::expected_void_toplevel_base<void, E> {
 public:
-    using _internal::expected_toplevel_base<void, E>::expected_toplevel_base;
-
-private:
-    friend struct _internal::expected_common_interface<void, E, expected>;
+    using _internal::expected_void_toplevel_base<void, E>::expected_void_toplevel_base;
 };
 template<typename E>
-class expected<const void, E> :
-    _internal::expected_toplevel_base<const void, E>,
-    public _internal::expected_common_interface<const void, E, expected<const void, E>>,
-    public _internal::swappable_base<const void, E, expected<const void, E>>
-{
+class expected<const void, E> : public _internal::expected_void_toplevel_base<const void, E> {
 public:
-    using _internal::expected_toplevel_base<const void, E>::expected_toplevel_base;
-
-private:
-    friend struct _internal::expected_common_interface<const void, E, expected>;
+    using _internal::expected_void_toplevel_base<const void, E>::expected_void_toplevel_base;
 };
 template<typename E>
-class expected<volatile void, E> :
-    _internal::expected_toplevel_base<volatile void, E>,
-    public _internal::expected_common_interface<volatile void, E, expected<volatile void, E>>,
-    public _internal::swappable_base<volatile void, E, expected<volatile void, E>>
-{
+class expected<volatile void, E> : public _internal::expected_void_toplevel_base<volatile void, E> {
 public:
-    using _internal::expected_toplevel_base<volatile void, E>::expected_toplevel_base;
-
-private:
-    friend struct _internal::expected_common_interface<volatile void, E, expected>;
+    using _internal::expected_void_toplevel_base<volatile void, E>::expected_void_toplevel_base;
 };
 template<typename E>
-class expected<const volatile void, E> :
-    _internal::expected_toplevel_base<const volatile void, E>,
-    public _internal::expected_common_interface<const volatile void, E, expected<const volatile void, E>>,
-    public _internal::swappable_base<const volatile void, E, expected<const volatile void, E>>
-{
+class expected<const volatile void, E> : public _internal::expected_void_toplevel_base<const volatile void, E> {
 public:
-    using _internal::expected_toplevel_base<const volatile void, E>::expected_toplevel_base;
-
-private:
-    friend struct _internal::expected_common_interface<const volatile void, E, expected>;
+    using _internal::expected_void_toplevel_base<const volatile void, E>::expected_void_toplevel_base;
 };
 
 }
