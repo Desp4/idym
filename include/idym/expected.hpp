@@ -899,6 +899,13 @@ public:
     template<
         typename T2,
         ::std::enable_if_t<!_internal::is_specialization_of_v<T2, expected> && _internal::expected_eq_test<const T&, const T2&>::value, bool> = true
+        >
+    friend constexpr bool operator!=(const T2& v, const expected& x) {
+        return x != v;
+    }
+    template<
+        typename T2,
+        ::std::enable_if_t<!_internal::is_specialization_of_v<T2, expected> && _internal::expected_eq_test<const T&, const T2&>::value, bool> = true
     >
     friend constexpr bool operator==(const T2& v, const expected& x) {
         return x == v;
@@ -907,6 +914,10 @@ public:
     template<typename E2, ::std::enable_if_t<_internal::expected_eq_test<const E&, const E2&>::value, bool> = true>
     friend constexpr bool operator!=(const expected& x, const unexpected<E2>& e) {
         return !(x == e);
+    }
+    template<typename E2, ::std::enable_if_t<_internal::expected_eq_test<const E&, const E2&>::value, bool> = true>
+    friend constexpr bool operator!=(const unexpected<E2>& e, const expected& x) {
+        return x != e;
     }
     template<typename E2, ::std::enable_if_t<_internal::expected_eq_test<const E&, const E2&>::value, bool> = true>
     friend constexpr bool operator==(const unexpected<E2>& e, const expected& x) {
