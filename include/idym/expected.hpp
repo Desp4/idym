@@ -746,7 +746,7 @@ public:
     template<typename F, _internal::expected_monad_constraint_t<F, E, const E&> = true>
     constexpr auto and_then(F&& f) const & {
         if (this->_has_val)
-            return inmake_monad_invoke_retvoke(::std::is_void<T>{}, ::std::forward<F>(f), this->_val);
+            return make_monad_invoke_ret(::std::is_void<T>{}, ::std::forward<F>(f), this->_val);
         return expected_invoke_result_t<F, decltype(this->_val)>(unexpect, this->error());
     }
 
