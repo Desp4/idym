@@ -1018,7 +1018,7 @@ private:
     }
     template<::std::size_t I, typename T>
     constexpr void assign_impl(::std::false_type, T&& t) {
-        emplace<I>(_internal::index_to_alternative_t<I>(::std::forward<T>(t)));
+        emplace<I>(_internal::index_to_alternative_t<I, Ts...>(::std::forward<T>(t)));
     }
 };
 

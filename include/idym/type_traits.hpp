@@ -231,6 +231,13 @@ struct invoke_result : _internal::invoke_result<void, F, Args...> {};
 template<typename F, typename... Args>
 using invoke_result_t = typename invoke_result<F, Args...>::type;
 
+// === negation
+template<typename B>
+struct negation : ::std::integral_constant<bool, !static_cast<bool>(B::value)> {};
+
+template<typename B>
+constexpr bool negation_v = negation<B>::value;
+
 }
 
 #endif

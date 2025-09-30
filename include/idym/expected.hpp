@@ -134,11 +134,20 @@ IDYM_INTERNAL_CXX17_INLINE constexpr unexpect_t unexpect{};
 
 namespace _internal { // >>> internal
 
+template<typename, typename T, template<typename...> class... T_Else>
+struct void_or_traits : ::std::integral_constant<bool, conjunction_v<T_Else<T>...>> {};
+
+template<typename T, template<typename...> class... T_Else>
+struct void_or_traits<::std::enable_if_t<::std::is_void<T>::value>, T, T_Else...> : ::std::true_type {};
+
+template<typename T, template<typename...> class... T_Else>
+constexpr bool void_or_traits_v = void_or_traits<void, T, T_Else...>::value;
+
 template<typename T, typename E>
-constexpr bool expected_move_ctor_noexcept_v = (::std::is_void<T>::value || ::std::is_nothrow_move_constructible<T>::value) && ::std::is_nothrow_move_constructible<E>::value;
+constexpr bool expected_move_ctor_noexcept_v = void_or_traits_v<T, ::std::is_nothrow_move_constructible> && ::std::is_nothrow_move_constructible<E>::value;
 template<typename T, typename E>
 constexpr bool expected_move_ass_noexcept_v =
-    (::std::is_void<T>::value || (::std::is_nothrow_move_assignable<T>::value && ::std::is_nothrow_move_constructible<T>::value)) &&
+    void_or_traits_v<T, ::std::is_nothrow_move_assignable, ::std::is_nothrow_move_constructible> &&
     ::std::is_nothrow_move_assignable<E>::value && ::std::is_nothrow_move_constructible<E>::value;
 
 // === expected_value_member
@@ -185,7 +194,7 @@ struct expected_base_impl<false, T, E> {
 
 template<typename T, typename E>
 struct expected_base : protected expected_base_impl<
-    (::std::is_void<T>::value || ::std::is_trivially_destructible<T>::value) && ::std::is_trivially_destructible<E>::value, T, E
+    void_or_traits_v<T, ::std::is_trivially_destructible> && ::std::is_trivially_destructible<E>::value, T, E
 > {};
 
 // === reinit_expected
@@ -216,15 +225,21 @@ constexpr void reinit_expected_dispatch_nothrow_cons(::std::true_type, T& newval
 template<typename T, typename U, typename... Args>
 constexpr void reinit_expected_dispatch_nothrow_cons(::std::false_type, T& newval, U& oldval, Args&&... args) {
     reinit_expected_dispatch_nothrow_move_cons(
-        ::std::integral_constant<bool, ::std::is_void<T>::value || ::std::is_nothrow_move_constructible<T>::value>{},
+        ::std::integral_constant<bool, void_or_traits_v<T, ::std::is_nothrow_move_constructible>>{},
         newval, oldval, ::std::forward<Args>(args)...
     );
 }
 
+template<typename... Args>
+struct unevaluted_is_nothrow_constructible {
+    template<typename T>
+    using type = ::std::is_nothrow_constructible<T, Args...>;
+};
+
 template<typename T, typename U, typename... Args>
 constexpr void reinit_expected(T& newval, U& oldval, Args&&... args) {
     reinit_expected_dispatch_nothrow_cons(
-        ::std::integral_constant<bool, ::std::is_void<T>::value || ::std::is_nothrow_constructible<T, Args...>::value>{},
+        ::std::integral_constant<bool, void_or_traits_v<T, unevaluted_is_nothrow_constructible<Args...>::template type>>{},
         newval, oldval, ::std::forward<Args>(args)...
     );
 }
@@ -232,9 +247,9 @@ constexpr void reinit_expected(T& newval, U& oldval, Args&&... args) {
 // === expected_ncopy_ass_base
 template<typename T, typename E>
 constexpr bool expected_ncopy_ass_defined_v =
-    (::std::is_void<T>::value || (::std::is_copy_assignable<T>::value && ::std::is_copy_constructible<T>::value)) &&
+    void_or_traits_v<T, ::std::is_copy_assignable, ::std::is_copy_constructible> &&
     ::std::is_copy_assignable<E>::value && ::std::is_copy_constructible<E>::value &&
-    (::std::is_void<T>::value || ::std::is_nothrow_move_constructible<T>::value || ::std::is_nothrow_move_constructible<E>::value);
+    (void_or_traits_v<T, ::std::is_nothrow_move_constructible> || ::std::is_nothrow_move_constructible<E>::value);
 
 template<typename T, typename E>
 struct expected_ncopy_ass_base_impl : expected_base<T, E> {
@@ -246,9 +261,9 @@ using expected_ncopy_ass_base = ::std::conditional_t<expected_ncopy_ass_defined_
 // === expected_nmove_ass_base
 template<typename T, typename E>
 constexpr bool expected_nmove_ass_defined_v =
-    (::std::is_void<T>::value || (::std::is_move_assignable<T>::value && ::std::is_move_constructible<T>::value)) &&
+    void_or_traits_v<T, ::std::is_move_assignable, ::std::is_move_constructible> &&
     ::std::is_move_assignable<E>::value && ::std::is_move_constructible<E>::value &&
-    (::std::is_void<T>::value || ::std::is_nothrow_move_constructible<T>::value || ::std::is_nothrow_move_constructible<E>::value);
+    (void_or_traits_v<T, ::std::is_nothrow_move_constructible> || ::std::is_nothrow_move_constructible<E>::value);
 
 template<typename T, typename E>
 struct expected_nmove_ass_base_impl : expected_ncopy_ass_base<T, E> {
@@ -284,8 +299,8 @@ struct expected_copy_ctor_base_impl : expected_movecopy_base<T, E> {
 };
 template<typename T, typename E>
 using expected_copy_ctor_base = ::std::conditional_t<
-    ((::std::is_void<T>::value || ::std::is_copy_constructible<T>::value) && ::std::is_copy_constructible<E>::value) &&
-    !((::std::is_void<T>::value || ::std::is_trivially_copy_constructible<T>::value) && ::std::is_trivially_copy_constructible<E>::value),
+    void_or_traits_v<T, ::std::is_copy_constructible> && ::std::is_copy_constructible<E>::value &&
+    !(void_or_traits_v<T, ::std::is_trivially_copy_constructible> && ::std::is_trivially_copy_constructible<E>::value),
     expected_copy_ctor_base_impl<T, E>, expected_movecopy_base<T, E>
 >;
 
@@ -307,8 +322,8 @@ struct expected_move_ctor_base_impl : expected_copy_ctor_base<T, E> {
 };
 template<typename T, typename E>
 using expected_move_ctor_base = ::std::conditional_t<
-    ((::std::is_void<T>::value || ::std::is_move_constructible<T>::value) && ::std::is_move_constructible<E>::value) &&
-    !((::std::is_void<T>::value || ::std::is_trivially_move_constructible<T>::value) && ::std::is_trivially_move_constructible<E>::value),
+    void_or_traits_v<T, ::std::is_move_constructible> && ::std::is_move_constructible<E>::value &&
+    !(void_or_traits_v<T, ::std::is_trivially_move_constructible> && ::std::is_trivially_move_constructible<E>::value),
     expected_move_ctor_base_impl<T, E>, expected_copy_ctor_base<T, E>
 >;
 
@@ -381,7 +396,7 @@ struct expected_def_ctor_base_impl<false, T, E> : expected_copy_ass_base<T, E> {
 };
 
 template<typename T, typename E>
-using expected_def_ctor_base = expected_def_ctor_base_impl<::std::is_void<T>::value || ::std::is_default_constructible<T>::value, T, E>;
+using expected_def_ctor_base = expected_def_ctor_base_impl<void_or_traits_v<T, ::std::is_default_constructible>, T, E>;
 
 // === traits
 template<typename T, template<typename...> class Template_T>
@@ -396,6 +411,9 @@ constexpr bool converts_from_any_cvref_v = disjunction_v<
     ::std::is_constructible<T, const W&>, ::std::is_convertible<const W&, T>,
     ::std::is_constructible<T, const W>, ::std::is_convertible<const W, T>
 >;
+
+template<typename T, typename W>
+struct converts_from_any_cvref : ::std::integral_constant<bool, converts_from_any_cvref_v<T, W>> {};
 
 template<typename T1, typename T2, typename = void>
 struct expected_eq_test : ::std::false_type {};
@@ -414,7 +432,10 @@ constexpr bool compare_expected_values(::std::false_type, const T1& x, const T2&
 
 template<typename F, typename T1, typename T2>
 struct expected_monad_constraint {
-    using type = ::std::enable_if_t<::std::is_void<T1>::value || ::std::is_constructible<T1, T2>::value, bool>;
+    template<typename T>
+    using unevaluated_constructible = ::std::is_constructible<T, T2>;
+
+    using type = ::std::enable_if_t<void_or_traits_v<T1, unevaluated_constructible>, bool>;
 };
 template<typename F, typename T1, typename T2>
 using expected_monad_constraint_t = typename expected_monad_constraint<F, T1, T2>::type;
@@ -422,13 +443,13 @@ using expected_monad_constraint_t = typename expected_monad_constraint<F, T1, T2
 // === swappable_base
 template<typename T, typename E>
 constexpr bool expected_swappable_v =
-    (::std::is_void<T>::value || is_swappable_v<T>) && is_swappable_v<E> &&
-    (::std::is_void<T>::value || ::std::is_move_constructible<T>::value) && ::std::is_move_constructible<E>::value &&
-    (::std::is_void<T>::value || ::std::is_nothrow_move_constructible<T>::value || ::std::is_nothrow_move_constructible<E>::value);
+    void_or_traits_v<T, is_swappable> && is_swappable_v<E> &&
+    void_or_traits_v<T, ::std::is_move_constructible> && ::std::is_move_constructible<E>::value &&
+    (void_or_traits_v<T, ::std::is_nothrow_move_constructible> || ::std::is_nothrow_move_constructible<E>::value);
 
 template<typename T, typename E>
 constexpr bool expected_swap_noexcept_v =
-    (::std::is_void<T>::value || (::std::is_nothrow_move_constructible<T>::value && is_nothrow_swappable_v<T>)) &&
+    void_or_traits_v<T, ::std::is_nothrow_move_constructible, is_nothrow_swappable> &&
     ::std::is_nothrow_move_constructible<E>::value && is_nothrow_swappable_v<E>;
 
 template<bool Trivial, typename T, typename E>
@@ -533,18 +554,47 @@ struct expected_invoke_result<F, T, ::std::enable_if_t<::std::is_same<remove_cvr
 template<typename F, typename T>
 using expected_invoke_result_t = typename expected_invoke_result<F, T>::type;
 
+// === unevaluated void-aware traits
+template<typename T, typename UF, typename = void>
+struct is_expected_explicit_convertible : ::std::integral_constant<bool, ::std::is_convertible<UF, T>::value> {};
+
+template<typename T, typename UF>
+struct is_expected_explicit_convertible<T, UF, ::std::enable_if_t<::std::is_void<T>::value>> : ::std::true_type {};
+
+template<typename T, typename U, template<typename...> class T_Else, typename = void>
+struct void_tu_or_trait : ::std::integral_constant<bool, T_Else<T>::value> {};
+
+template<typename T, typename U, template<typename...> class T_Else>
+struct void_tu_or_trait<T, U, T_Else, ::std::enable_if_t<::std::is_void<T>::value || ::std::is_void<U>::value>> :
+    ::std::integral_constant<bool, ::std::is_void<T>::value && ::std::is_void<U>::value>
+{};
+
+template<typename UF>
+struct unevaluated_is_constructible {
+    template<typename T>
+    using type = ::std::is_constructible<T, UF>;
+};
+
+template<typename U, typename G>
+struct unevaluated_converts_from_any_cvref {
+    template<typename T>
+    using type = disjunction<::std::is_same<bool, ::std::remove_cv_t<T>>, negation<converts_from_any_cvref<T, expected<U, G>>>>;
+};
+
 // === expected_toplevel_base
 template<typename T, typename E>
 struct expected_toplevel_base : swappable_base<T, E> {
 private:
+    using is_this_t_void = ::std::is_void<T>;
+
     // msvc 19.16.27050.0 refuses to treat constexpr vars or functions as const evaluated in sfinae contexts, macros instead
 #define IDYM_COMPAT_EXPECTED_EXPLICIT_V \
-    ((!::std::is_void<T>::value && !::std::is_convertible<UF, T>::value) || !::std::is_convertible<GF, E>::value)
+    (!is_expected_explicit_convertible<T, UF>::value || !::std::is_convertible<GF, E>::value)
 
 #define IDYM_COMPAT_EXPECTED_CONSTRAINT_V \
-    (((::std::is_void<T>::value && ::std::is_void<U>::value) || ::std::is_constructible<T, UF>::value) && \
+    (void_tu_or_trait<T, U, unevaluated_is_constructible<UF>::template type>::value && \
     ::std::is_constructible<E, GF>::value && \
-    ((::std::is_void<T>::value && ::std::is_void<U>::value) || ::std::is_same<bool, ::std::remove_cv_t<T>>::value || !_internal::converts_from_any_cvref_v<T, expected<U, G>>) && \
+    void_tu_or_trait<T, U, unevaluated_converts_from_any_cvref<U, G>::template type>::value && \
     !::std::is_constructible<unexpected<E>, expected<U, G>&>::value && \
     !::std::is_constructible<unexpected<E>, expected<U, G>>::value && \
     !::std::is_constructible<unexpected<E>, const expected<U, G>&>::value && \
