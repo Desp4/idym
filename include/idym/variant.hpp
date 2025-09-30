@@ -752,7 +752,7 @@ constexpr auto get_if_impl(Variant_T&& v) {
 }
 template<typename T, typename Variant_T>
 constexpr auto get_if_impl(Variant_T&& v) {
-    static_assert(type_occurrence_count<T, remove_cvref_t<Variant_T>>::value == 1, "T has occur in Ts exactly once");
+    static_assert(type_occurrence_count<T, remove_cvref_t<Variant_T>>::value == 1, "T has to occur in Ts exactly once");
     return get_if_impl<alternative_to_index_helper<0, T, remove_cvref_t<Variant_T>>::value>(::std::forward<Variant_T>(v));
 }
 
@@ -1053,7 +1053,7 @@ private:
 // === holds_alternative
 template<typename T, typename... Ts>
 constexpr bool holds_alternative(const variant<Ts...>& v) noexcept {
-    static_assert(_internal::type_occurrence_count<T, Ts...>::value == 1, "T has occur in Ts exactly once");
+    static_assert(_internal::type_occurrence_count<T, Ts...>::value == 1, "T has to occur in Ts exactly once");
     return !v.valueless_by_exception() && v.index() == _internal::alternative_to_index<0, T, Ts...>::value;
 }
 
