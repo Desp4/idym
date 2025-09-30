@@ -209,7 +209,7 @@ void run_6_10() {
     static_assert(!ex_trivial_copy_cons<idym_test::copy_ctor, int>, "expected.object.cons.10");
     static_assert(!ex_trivial_copy_cons<int, idym_test::copy_ctor>, "expected.object.cons.10");
     static_assert(!ex_trivial_copy_cons<idym_test::copy_ctor, idym_test::copy_ctor>, "expected.object.cons.10");
-    
+
     {
         idym::expected<idym_test::copy_ctor, int> ex1{};
         auto ex2 = ex1;
