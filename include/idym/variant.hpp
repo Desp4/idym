@@ -634,7 +634,7 @@ struct instanceof_in_place_index<in_place_index_t<I>> : ::std::true_type {};
 // === varaint(T&&) and operator=(T&&) constraint deduction
 /*
  * Unique_I exists to guard against inaccessible bases
- * + to fascilicate the detection of erroneous on gcc 6.4
+ * + to fascilicate the detection of erroneous overload resolution on gcc 6.4
  * as it doesn't care about ambiguous calls and chooses the first "used" inherited operator
  */
 template<typename T, ::std::size_t Unique_I> 
