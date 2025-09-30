@@ -380,6 +380,9 @@ struct expected_def_ctor_base_impl<false, T, E> : expected_copy_ass_base<T, E> {
     constexpr expected_def_ctor_base_impl(dummy_t) {}
 };
 
+template<typename T, typename E>
+using expected_def_ctor_base = expected_def_ctor_base_impl<::std::is_void<T>::value || ::std::is_default_constructible<T>::value, T, E>;
+
 // === traits
 template<typename T, template<typename...> class Template_T>
 constexpr bool is_specialization_of_v = false;
@@ -418,9 +421,6 @@ struct expected_monad_constraint {
 };
 template<typename F, typename T1, typename T2>
 using expected_monad_constraint_t = typename expected_monad_constraint<F, T1, T2>::type;
-
-template<typename T, typename E>
-using expected_def_ctor_base = expected_def_ctor_base_impl<::std::is_void<T>::value || ::std::is_default_constructible<T>::value, T, E>;
 
 // === swappable_base
 template<typename T, typename E>

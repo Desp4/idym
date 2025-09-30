@@ -146,6 +146,13 @@ struct get_variant_storage<0> {
 };
 
 // === visitor
+// msvc 19.16.27050.0 gets confused on pack expansion in functions below, this struct breaks it down
+template<::std::size_t... Is>
+struct partial_index_sequence {
+    template<::std::size_t I>
+    using type = ::std::index_sequence<Is..., I>;
+};
+
 template<typename Ret_T, typename Is_Sequence_T, typename Visitor_T, typename... Storage_Ts>
 struct dispatch_variant_storage;
 
@@ -159,9 +166,11 @@ struct dispatch_variant_storage<Ret_T, ::std::index_sequence<Is...>, Visitor_T, 
 template<typename Ret_T, typename Visitor_T, typename... Storage_Ts, ::std::size_t... Is, ::std::size_t... Sequence_Is>
 constexpr auto make_dispatch_table(::std::index_sequence<Is...>, ::std::index_sequence<Sequence_Is...>) {
     using dispatch_t = dispatch_variant_storage<Ret_T, ::std::index_sequence<Sequence_Is..., 0>, Visitor_T, Storage_Ts...>;
+    using partial_seq_t = partial_index_sequence<Sequence_Is...>;
+
     return ::std::array<
         decltype(dispatch_t::do_dispatch)*, sizeof...(Is)
-    >{dispatch_variant_storage<Ret_T, ::std::index_sequence<Sequence_Is..., Is>, Visitor_T, Storage_Ts...>::do_dispatch...};
+    >{dispatch_variant_storage<Ret_T, typename partial_seq_t::template type<Is>, Visitor_T, Storage_Ts...>::do_dispatch...};
 }
 
 template<typename Alt_Indices, typename Src_Type>
@@ -198,12 +207,13 @@ struct alt_visitor_table<
         Storage_Ts...
     >;
     using next_dispatch_table_t = decltype(next_dispatch_t::dispatch_table);
+    using partial_seq_t = partial_index_sequence<Is_Sequence...>;
 
     static constexpr ::std::array<next_dispatch_table_t, sizeof...(Alt_Indices)> dispatch_table{
         alt_visitor_table<
             Ret_T,
             alt_visitor_accumulator<Acc_Ts..., Src_T>,
-            ::std::index_sequence<Is_Sequence..., Alt_Indices>,
+            typename partial_seq_t::template type<Alt_Indices>,
             Visitor_T,
             Storage_Ts...
         >::dispatch_table...
@@ -800,20 +810,19 @@ constexpr ::std::size_t variant_size_v = variant_size<T>::value;
 template<typename... Ts>
 class variant : _internal::variant_base_final<Ts...> {
     static_assert(sizeof...(Ts) > 0, "Variant must have at least one alternative");
-    
+
 public:
     constexpr variant() noexcept(_internal::var_def_ctor_nothrow_v<Ts...>) = default;
     
     template<
         typename T,
+        typename Compat_Ctor_T = _internal::variant_ctor_compat_t<T, Ts...>, // MSVC 19.16.27050.0 bug, has to be expanded before usage in a constraint
         ::std::enable_if_t<
             !::std::is_same<remove_cvref_t<T>, variant>::value &&
             !_internal::instanceof_in_place_type<remove_cvref_t<T>>::value &&
             !_internal::instanceof_in_place_index<remove_cvref_t<T>>::value,
         bool> = true,
-        ::std::enable_if_t<
-            ::std::is_constructible<_internal::variant_ctor_compat_t<T, Ts...>, T>::value,
-        bool> = true
+        ::std::enable_if_t<::std::is_constructible<Compat_Ctor_T, T>::value, bool> = true
     >
     constexpr variant(T&& t) noexcept(::std::is_nothrow_constructible<_internal::variant_ctor_compat_t<T, Ts...>, T>::value) :
         variant{in_place_type<_internal::variant_ctor_compat_t<T, Ts...>>, ::std::forward<T>(t)}
@@ -866,22 +875,22 @@ public:
     
     template<
         typename T,
+        typename Compat_Ctor_T = _internal::variant_ctor_compat_t<T, Ts...>, // same msvc issue as in a ctor
         ::std::enable_if_t<
             !::std::is_same<remove_cvref_t<T>, variant>::value,
         bool> = true,
         ::std::enable_if_t<
-            ::std::is_assignable<_internal::variant_ctor_compat_t<T, Ts...>&, T>::value &&
-            ::std::is_constructible<_internal::variant_ctor_compat_t<T, Ts...>, T>::value,
+            ::std::is_assignable<Compat_Ctor_T&, T>::value &&
+            ::std::is_constructible<Compat_Ctor_T, T>::value,
         bool> = true
     >
     constexpr variant& operator=(T&& t) noexcept(
-        ::std::is_nothrow_assignable<_internal::variant_ctor_compat_t<T, Ts...>&, T>::value &&
-        ::std::is_nothrow_constructible<_internal::variant_ctor_compat_t<T, Ts...>, T>::value
+        ::std::is_nothrow_assignable<Compat_Ctor_T&, T>::value &&
+        ::std::is_nothrow_constructible<Compat_Ctor_T, T>::value
     )
     {
-        using alt_t = _internal::variant_ctor_compat_t<T, Ts...>;
-        constexpr auto alt_ind = _internal::alternative_to_index<0, alt_t, Ts...>::value;
-        constexpr auto direct_emplace = ::std::is_nothrow_constructible<alt_t, T>::value || !::std::is_nothrow_move_constructible<alt_t>::value;
+        constexpr auto alt_ind = _internal::alternative_to_index<0, Compat_Ctor_T, Ts...>::value;
+        constexpr auto direct_emplace = ::std::is_nothrow_constructible<Compat_Ctor_T, T>::value || !::std::is_nothrow_move_constructible<Compat_Ctor_T>::value;
         
         if (this->_index == alt_ind)
             *_internal::get_variant_storage<alt_ind>::do_get(this->_storage) = std::forward<T>(t);

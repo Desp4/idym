@@ -561,8 +561,11 @@ void run_1_5() {
         v1.swap(v2);
         idym_test::validate(idym::get<0>(v1).swapped_status == 1, "variant.swap.3.2");
         idym_test::validate(idym::get<0>(v2).swapped_status == 2, "variant.swap.3.2");
-        
+
+        // msvc 19.16.27050.0 doesn't understand noexcept(false) in dependent contexts
+#if _MSC_VER > 1916
         static_assert(!noexcept(v1.swap(v2)), "variant.swap.5");
+#endif
     }
     {
         idym::variant<default_swappable, int> v1{idym::in_place_index<0>, 5};
