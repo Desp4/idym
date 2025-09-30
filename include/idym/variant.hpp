@@ -632,27 +632,55 @@ template<::std::size_t I>
 struct instanceof_in_place_index<in_place_index_t<I>> : ::std::true_type {};
 
 // === varaint(T&&) and operator=(T&&) constraint deduction
-template<typename T, ::std::size_t Unique_I> // Unique_I to guard against inaccessible bases
+/*
+ * Unique_I exists to guard against inaccessible bases
+ * + to fascilicate the detection of erroneous on gcc 6.4
+ * as it doesn't care about ambiguous calls and chooses the first "used" inherited operator
+ */
+template<typename T, ::std::size_t Unique_I> 
 struct variant_overload {
-    T operator()(T (&&)[1]);
+    using type = T;
+    static constexpr ::std::size_t value = Unique_I;
+
+    variant_overload<T, Unique_I> operator()(T (&&)[1]);
 };
 
-template<typename...>
+template<bool, typename...>
 struct variant_overload_set;
 
 template<typename T, typename... Ts>
-struct variant_overload_set<T, Ts...> : variant_overload<T, sizeof...(Ts)>, variant_overload_set<Ts...> {
+struct variant_overload_set<false, T, Ts...> : variant_overload<T, sizeof...(Ts)>, variant_overload_set<false, Ts...> {
     using variant_overload<T, sizeof...(Ts)>::operator();
-    using variant_overload_set<Ts...>::operator();
+    using variant_overload_set<false, Ts...>::operator();
+};
+template<typename T, typename... Ts>
+struct variant_overload_set<true, T, Ts...> : variant_overload<T, sizeof...(Ts)>, variant_overload_set<true, Ts...> {
+    using variant_overload_set<true, Ts...>::operator();
+    using variant_overload<T, sizeof...(Ts)>::operator();
 };
 
 template<typename T>
-struct variant_overload_set<T> : variant_overload<T, 0> {
+struct variant_overload_set<true, T> : variant_overload<T, 0> {
+    using variant_overload<T, 0>::operator();
+};
+template<typename T>
+struct variant_overload_set<false, T> : variant_overload<T, 0> {
     using variant_overload<T, 0>::operator();
 };
 
+template<typename T_Overload1, typename T_Overload2, typename = void>
+struct variant_overload_resolver;
+
+template<typename T_Overload1, typename T_Overload2>
+struct variant_overload_resolver<T_Overload1, T_Overload2, ::std::enable_if_t<T_Overload1::value == T_Overload2::value>> {
+    using type = typename T_Overload1::type;
+};
+
 template<typename Arg_T, typename... Ts>
-using variant_ctor_compat_t = decltype(::std::declval<variant_overload_set<Ts...>>()({::std::declval<Arg_T>()}));
+using variant_ctor_compat_t = typename variant_overload_resolver<
+    decltype(::std::declval<variant_overload_set<false, Ts...>>()({::std::declval<Arg_T>()})),
+    decltype(::std::declval<variant_overload_set<true, Ts...>>()({::std::declval<Arg_T>()}))
+>::type;
 
 // === alternative_to_index
 template<::std::size_t, typename, typename...>
@@ -824,8 +852,8 @@ public:
         bool> = true,
         ::std::enable_if_t<::std::is_constructible<Compat_Ctor_T, T>::value, bool> = true
     >
-    constexpr variant(T&& t) noexcept(::std::is_nothrow_constructible<_internal::variant_ctor_compat_t<T, Ts...>, T>::value) :
-        variant{in_place_type<_internal::variant_ctor_compat_t<T, Ts...>>, ::std::forward<T>(t)}
+    constexpr variant(T&& t) noexcept(::std::is_nothrow_constructible<Compat_Ctor_T, T>::value) :
+        variant{in_place_type<Compat_Ctor_T>, ::std::forward<T>(t)}
     {
     }
     
