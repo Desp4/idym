@@ -589,8 +589,6 @@ struct unevaluated_converts_from_any_cvref {
 template<typename T, typename E>
 struct expected_toplevel_base : swappable_base<T, E> {
 private:
-    using is_this_t_void = ::std::is_void<T>;
-
     // msvc 19.16 refuses to treat constexpr vars or functions as const evaluated in sfinae contexts, macros instead
 #define IDYM_COMPAT_EXPECTED_EXPLICIT_V \
     (!is_expected_explicit_convertible<T, UF>::value || !::std::is_convertible<GF, E>::value)

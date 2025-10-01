@@ -50,21 +50,22 @@ struct make_void {
 };
 
 // === swappable_with
-template<typename T, typename U, typename = void>
+// gcc 9.2 doesn't like void_t in partial specializations below, using a comma instead
+template<typename T, typename U, typename = int>
 struct swappable_with_adl : ::std::false_type {};
 template<typename T, typename U>
 struct swappable_with_adl<
     T, U,
-    typename ::IDYM_NAMESPACE::_internal::make_void<decltype(swap(::std::declval<T>(), ::std::declval<U>()))>::type
-> : ::std::true_type {};
+    decltype(swap(::std::declval<T>(), ::std::declval<U>()), int{})
+    > : ::std::true_type {};
 
-template<typename T, typename U, typename = void>
+template<typename T, typename U, typename = int>
 struct swappable_with_std : ::std::false_type {};
 template<typename T, typename U>
 struct swappable_with_std<
     T, U,
-    typename ::IDYM_NAMESPACE::_internal::make_void<decltype(::std::swap(::std::declval<T>(), ::std::declval<U>()))>::type
-> : ::std::true_type {};
+    decltype(::std::swap(::std::declval<T>(), ::std::declval<U>()), int{})
+    > : ::std::true_type {};
 
 // nothrow_swappable
 template<typename T, typename U, typename = void>
@@ -111,7 +112,7 @@ constexpr invoke_dispatch_tag member_dispatch_tag() {
     using object_t = remove_cvref_t<Object>;
     constexpr bool is_wrapped = is_reference_wrapper_v<object_t>;
     constexpr bool is_derived_object = ::std::is_same<C, object_t>::value || ::std::is_base_of<C, object_t>::value;
-    
+
     if (is_derived_object)
         return invoke_dispatch_tag::member_ref;
     if (is_wrapped)
