@@ -146,7 +146,7 @@ struct get_variant_storage<0> {
 };
 
 // === visitor
-// msvc 19.16.27050.0 gets confused on pack expansion in functions below, this struct breaks it down
+// msvc 19.16 gets confused on pack expansion in functions below, this struct breaks it down
 template<::std::size_t... Is>
 struct partial_index_sequence {
     template<::std::size_t I>
@@ -844,7 +844,7 @@ public:
     
     template<
         typename T,
-        typename Compat_Ctor_T = _internal::variant_ctor_compat_t<T, Ts...>, // MSVC 19.16.27050.0 bug, has to be expanded before usage in a constraint
+        typename Compat_Ctor_T = _internal::variant_ctor_compat_t<T, Ts...>, // MSVC 19.16 bug, has to be expanded before usage in a constraint
         ::std::enable_if_t<
             !::std::is_same<remove_cvref_t<T>, variant>::value &&
             !_internal::instanceof_in_place_type<remove_cvref_t<T>>::value &&

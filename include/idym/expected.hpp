@@ -134,13 +134,17 @@ IDYM_INTERNAL_CXX17_INLINE constexpr unexpect_t unexpect{};
 
 namespace _internal { // >>> internal
 
-template<typename, typename T, template<typename...> class... T_Else>
-struct void_or_traits : ::std::integral_constant<bool, conjunction_v<T_Else<T>...>> {};
+// msvc 19.16 can't expand the template pack in void_or_traits, needs to happen in a separate template below
+template<typename T, template<typename> class... T_Else>
+constexpr bool template_conjunction_v = conjunction_v<T_Else<T>...>;
 
-template<typename T, template<typename...> class... T_Else>
+template<typename, typename T, template<typename> class... T_Else>
+struct void_or_traits : ::std::integral_constant<bool, template_conjunction_v<T, T_Else...>> {};
+
+template<typename T, template<typename> class... T_Else>
 struct void_or_traits<::std::enable_if_t<::std::is_void<T>::value>, T, T_Else...> : ::std::true_type {};
 
-template<typename T, template<typename...> class... T_Else>
+template<typename T, template<typename> class... T_Else>
 constexpr bool void_or_traits_v = void_or_traits<void, T, T_Else...>::value;
 
 template<typename T, typename E>
@@ -587,7 +591,7 @@ struct expected_toplevel_base : swappable_base<T, E> {
 private:
     using is_this_t_void = ::std::is_void<T>;
 
-    // msvc 19.16.27050.0 refuses to treat constexpr vars or functions as const evaluated in sfinae contexts, macros instead
+    // msvc 19.16 refuses to treat constexpr vars or functions as const evaluated in sfinae contexts, macros instead
 #define IDYM_COMPAT_EXPECTED_EXPLICIT_V \
     (!is_expected_explicit_convertible<T, UF>::value || !::std::is_convertible<GF, E>::value)
 
@@ -938,7 +942,7 @@ class expected : public _internal::expected_toplevel_base<T, E> {
         return ::std::is_convertible<U, T>::value;
     }
 
-    // msvc 19.16.27050.0 refuses to treat constexpr vars or functions as const evaluated in sfinae contexts, macros instead
+    // msvc 19.16 refuses to treat constexpr vars or functions as const evaluated in sfinae contexts, macros instead
 #define IDYM_COMPAT_T_CONSTRAINT_V \
     (!::std::is_same<remove_cvref_t<U>, in_place_t>::value && \
     !::std::is_same<remove_cvref_t<U>, expected>::value && \
