@@ -37,6 +37,9 @@ inline constexpr bool operator==(monostate, monostate) noexcept { return true; }
 inline constexpr ::std::strong_ordering operator<=>(monostate, monostate) noexcept {
     return ::std::strong_ordering::equal;
 }
+#else
+// suppliment for synthesized ops
+inline constexpr bool operator!=(monostate, monostate) noexcept { return false; }
 #endif
 
 // === bad_variant_access
@@ -629,22 +632,23 @@ struct instanceof_in_place_index<in_place_index_t<I>> : ::std::true_type {};
 
 // === varaint(T&&) and operator=(T&&) constraint deduction
 /*
- * clang 11 and below refuse to resolve overload set calls property(reports false positive ambiguous calls)
- * the code in the other branch is stolen from clang's stl, could properly be merged into a singular and universal
- * solution but cba
- */
-#if !defined(__clang__) || (__clang_major__ > 11)
-/*
  * Unique_I exists to guard against inaccessible bases
  * + to fascilicate the detection of erroneous overload resolution on gcc 6.4
  * as it doesn't care about ambiguous calls and chooses the first "used" inherited operator
  */
 template<typename T, ::std::size_t Unique_I> 
+struct variant_overload;
+
+template<typename T, ::std::size_t Unique_I>
+auto test_overload(T (&&)[1]) -> variant_overload<T, Unique_I>;
+
+template<typename T, ::std::size_t Unique_I> 
 struct variant_overload {
     using type = T;
     static constexpr ::std::size_t value = Unique_I;
 
-    variant_overload<T, Unique_I> operator()(T (&&)[1]);
+    template<typename U>
+    auto operator()(T, U&&) -> decltype(test_overload<T, Unique_I>({::std::declval<U>()}));
 };
 
 template<bool, typename...>
@@ -678,91 +682,14 @@ struct variant_overload_resolver<T_Overload1, T_Overload2, ::std::enable_if_t<T_
     using type = typename T_Overload1::type;
 };
 
-template<typename Arg_T, typename... Ts>
-using variant_ctor_compat_t = typename variant_overload_resolver<
-    decltype(::std::declval<variant_overload_set<false, Ts...>>()({::std::declval<Arg_T>()})),
-    decltype(::std::declval<variant_overload_set<true, Ts...>>()({::std::declval<Arg_T>()}))
->::type;
-#else
-template<typename T>
-struct identity { using type = T; };
-
-struct no_narrowing_check {
-  template <class Dest, class Source>
-  using Apply = identity<Dest>;
-};
-
-struct narrowing_check {
-  template <class Dest>
-  static auto test_impl(Dest (&&)[1]) -> identity<Dest>;
-  template <class Dest, class Source>
-  using Apply = decltype(test_impl<Dest>({::std::declval<Source>()}));
-};
-
-template <class Dest, class Source>
-using check_for_narrowing =
-  typename ::std::conditional_t<
-    ::std::is_arithmetic<Dest>::value,
-    narrowing_check,
-    no_narrowing_check
-  >::template Apply<Dest, Source>;
-
-template <class Tp, ::std::size_t Idx>
-struct overload {
-  template <class Up>
-  auto operator()(Tp, Up&&) const -> check_for_narrowing<Tp, Up>;
-};
-
-template <class Tp, ::std::size_t>
-struct overload_bool  {
-  template <class Up, class Ap = remove_cvref_t<Up>>
-  auto operator()(bool, Up&&) const
-      -> ::std::enable_if_t<::std::is_same<Ap, bool>::value, identity<Tp>>;
-};
-
-template <::std::size_t Idx>
-struct overload<bool, Idx> : overload_bool<bool, Idx> {};
-template <::std::size_t Idx>
-struct overload<bool const, Idx> : overload_bool<bool const, Idx> {};
-template <::std::size_t Idx>
-struct overload<bool volatile, Idx> : overload_bool<bool volatile, Idx> {};
-template <::std::size_t Idx>
-struct overload<bool const volatile, Idx> : overload_bool<bool const volatile, Idx> {};
-
-template <typename...>
-struct all_overloads;
-
-template<typename T, typename... Ts>
-struct all_overloads<T, Ts...> : T, all_overloads<Ts...> {
-    using T::operator();
-    using all_overloads<Ts...>::operator();
-};
-
-template<typename T>
-struct all_overloads<T> : T {
-    using T::operator();
-};
-
-template <class IdxSeq>
-struct make_overloads_imp;
-
-template <size_t ... Idx>
-struct make_overloads_imp<::std::index_sequence<Idx...> > {
-  template <class ... Types>
-  using Apply = all_overloads<overload<Types, Idx>...>;
-};
-
-template <class ... Types>
-using MakeOverloads = typename make_overloads_imp<
-    ::std::make_index_sequence<sizeof...(Types)> >::template Apply<Types...>;
-
 template<typename F, typename... Ts>
 auto test_overloads(F&& f, Ts&&... args) -> decltype(::std::forward<F>(f)(::std::forward<Ts>(args)...));
 
-template <class Tp, class... Types>
-using variant_ctor_compat_t =
-    typename decltype(test_overloads(::std::declval<MakeOverloads<Types...>>(), ::std::declval<Tp>(), ::std::declval<Tp>()))::type;
-#endif
+template<typename Arg_T, typename... Ts>
+using variant_ctor_compat_t = typename variant_overload_resolver<
+    decltype(::std::declval<variant_overload_set<false, Ts...>>()(::std::declval<Arg_T>(), ::std::declval<Arg_T>())),
+    decltype(::std::declval<variant_overload_set<true, Ts...>>()(::std::declval<Arg_T>(), ::std::declval<Arg_T>()))
+>::type;
 
 // === alternative_to_index
 template<::std::size_t, typename, typename...>

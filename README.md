@@ -1,6 +1,6 @@
 ## Compliant C++14 implementation of `std::variant` and `std::expected`
 
-The implementation includes the classes themselves and supplimentary standard library features not present in C++14.
+The implementation includes the classes themselves and supplementary standard library entities not present in C++14.
 Both `std::variant` and `std::expected` are defined as per the C++23 spec, with certain features omitted for the lack of language features dependending
 on the language version in use(see below).
 
@@ -48,3 +48,14 @@ language version required for all affected features.
 | Fully constexpr `expected::operator=` and `expected::swap` | *C++20(__cpp_constexpr)*        |
 | Constexpr non-trivial `expected` destructor                | *C++20(__cpp_constexpr)*        |
 | `unexpected` deduction guide                               | *C++17(__cpp_deduction_guides)* |
+
+#### Compiler support
+Below is a table of compiler versions the implementation is confirmed to support. Not every release
+in those ranges was tested, but just the oldest one I had access to and felt the need to support,
+the most recent version and a handful of versions in between that I was in the mood to verify.
+
+| Compiler  | Version range                  |
+| :-------- | :----------------------------- |
+| **MSVC**  | *[19.16.27050; 19.39.33521.0]* |
+| **Clang** | *[9.0.0; 21.1.0]*              |
+| **GCC**   | *[6.2; 15.2]*                  |
