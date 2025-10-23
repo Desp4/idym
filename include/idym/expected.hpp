@@ -404,9 +404,12 @@ using expected_def_ctor_base = expected_def_ctor_base_impl<void_or_traits_v<T, :
 
 // === traits
 template<typename T, template<typename...> class Template_T>
-constexpr bool is_specialization_of_v = false;
+struct is_specialization_of : ::std::false_type {};
 template<template<typename...> class Template_T, typename... Ts>
-constexpr bool is_specialization_of_v<Template_T<Ts...>, Template_T> = true;
+struct is_specialization_of<Template_T<Ts...>, Template_T> : ::std::true_type{};
+
+template<typename T, template<typename...> class Template_T>
+constexpr bool is_specialization_of_v = is_specialization_of<T, Template_T>::value;
 
 template<typename T, typename W>
 constexpr bool converts_from_any_cvref_v = disjunction_v<
@@ -934,12 +937,6 @@ private:
 // === expected
 template<typename T, typename E>
 class expected : public _internal::expected_toplevel_base<T, E> {
-    // compat T ctor traits
-    template<typename U>
-    static constexpr bool compat_t_explicit_v() {
-        return ::std::is_convertible<U, T>::value;
-    }
-
     // msvc 19.16 refuses to treat constexpr vars or functions as const evaluated in sfinae contexts, macros instead
 #define IDYM_COMPAT_T_CONSTRAINT_V \
     (!::std::is_same<remove_cvref_t<U>, in_place_t>::value && \
@@ -962,14 +959,14 @@ public:
     
     template<
         typename U = ::std::remove_cv_t<T>,
-        ::std::enable_if_t<::std::is_convertible<U, T>::value && IDYM_COMPAT_T_CONSTRAINT_V, bool> = true
+        ::std::enable_if_t<!::std::is_convertible<U, T>::value && IDYM_COMPAT_T_CONSTRAINT_V, bool> = true
     >
     constexpr explicit expected(U&& v) : expected{_internal::dummy_t{}} {
         forward_construct_t(std::forward<U>(v));
     }
     template<
         typename U = ::std::remove_cv_t<T>,
-        ::std::enable_if_t<!::std::is_convertible<U, T>::value && IDYM_COMPAT_T_CONSTRAINT_V, bool> = true
+        ::std::enable_if_t<::std::is_convertible<U, T>::value && IDYM_COMPAT_T_CONSTRAINT_V, bool> = true
     >
     constexpr expected(U&& v) : expected{_internal::dummy_t{}} {
         forward_construct_t(std::forward<U>(v));
@@ -1089,7 +1086,13 @@ public:
     // === comparators
     template<
         typename T2,
-        ::std::enable_if_t<!_internal::is_specialization_of_v<T2, ::IDYM_NAMESPACE::expected> && _internal::expected_eq_test<const T&, const T2&>::value, bool> = true
+        // gcc 6.3 may go into infinite recursion on expected_eq_test here, needs to be short-circuited by filtering expected instantiations out
+        // msvc 19.16 then gets scared when the value is accessed within enable_if, introduce the conjunction Constraint first
+        typename Constraint = conjunction<
+            negation<_internal::is_specialization_of<T2, ::IDYM_NAMESPACE::expected>>,
+            _internal::expected_eq_test<const T&, const T2&>
+        >,
+        ::std::enable_if_t<Constraint::value, bool> = true
     >
     friend constexpr bool operator==(const expected& x, const T2& v) {
         return x.has_value() && static_cast<bool>(*x == v);
